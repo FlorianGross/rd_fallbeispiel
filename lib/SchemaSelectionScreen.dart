@@ -5,6 +5,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'MeasuresOverviewScreen.dart';
+
 class SchemaSelectionScreen extends StatefulWidget {
   final Map<String, int> vehicleStatus;
 
@@ -22,20 +24,27 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       'Situation',
       'Support',
     ],
-    'Erster Eindruck': ['Zyanose', 'Hauttonus', 'Pathologische Atemgeräusche'],
+    'Erster Eindruck': [
+      'Zyanose',
+      'Hauttonus',
+      'Pathologische Atemgeräusche',
+      'Allgemeinzustand'
+    ],
+    'WASB': [
+      'Wach',
+      'Ansprechbar',
+      'Schmerzreiz',
+      'Bewusstlos',
+    ],
     'c/x': [
       'Abfrage kritische Blutungen',
-      'Kritische Blutung gestoppt',
-      'Reevaluation kritische Blutung',
     ],
     'a': [
       'Überprüfung Atemwege',
-      'Freimachen der Atemwege',
-      'Reevaluation Atemwege',
     ],
     'b': [
-      'Auszählen der Atemfrequenz',
-      'Abfrage Atemnot',
+      'Atemfrequenz',
+      'Atemzugvolumen',
     ],
     'c': [
       'Pulsfrequenz',
@@ -44,8 +53,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       'Recap',
     ],
     'STU': [
-      'Patient auf Rücken',
-      'Fixierung Kopf durch Helfer',
+      'Rückenlage',
+      'Kopf-Fixierung',
       'Blutungen Kopf',
       'Gesichtsknochen',
       'Austritt Flüssigkeiten Nase',
@@ -68,17 +77,19 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       'pDMS Arme',
       'Achsengerechte Drehung',
       'Rücken Stufenbildung',
-      'Becken Hartspann'
+      'Rücken Hartspann'
     ],
     'A': [
       'Atemwege überprüfen',
-      'Freimachen der Atemwege',
-      'Beatmung einleiten',
+      'Absaugbereitschaft'
+          'Atemwegssicherung',
     ],
     'B': [
       'Auskultieren',
       'Atemhilfsmuskulatur',
       'Sp02',
+      'Kontrollierte/Assistierte Beatmung',
+      'Sauerstoffgabe',
     ],
     'C': [
       'Hauttonus',
@@ -86,6 +97,9 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       'Puls',
       'Recap',
       'EKG',
+      'Lagerung',
+      'Zugang IV / IO',
+      'Volumengabe',
     ],
     'D': [
       'FAST',
@@ -100,6 +114,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       'Verletzungen',
       'Einstichstellen',
       'Insulinpumpe'
+          'Wärmeerhalt'
     ],
     'BE-FAST': [
       'Balance',
@@ -133,20 +148,6 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       'Severity',
       'Time',
     ],
-    'Maßnahmen': [
-      'Freimachen der Atemwege',
-      'Beatmung (Kontrolliert / Assistiert)',
-      'Sauerstoffgabe',
-      'Lagerung',
-      'Wärmeerhalt',
-    ],
-    'Maßnahmen erweitert': [
-      'Zugang IV / IO',
-      'Medikamentengabe',
-      'Defibrillation',
-      'Thoraxdrainage',
-      'Intubation',
-    ],
     'Nachforderung': [
       'NEF',
       'RTW',
@@ -172,7 +173,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       widget.vehicleStatus.forEach((key, value) {
         if (value == 2 &&
             !completedActions.any(
-                    (e) => e['schema'] == 'Nachforderung' && e['action'] == key)) {
+                (e) => e['schema'] == 'Nachforderung' && e['action'] == key)) {
           completedActions.add({
             'schema': 'Nachforderung',
             'action': key,
@@ -186,7 +187,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
         _elapsedSeconds++;
       });
@@ -204,9 +205,9 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     final pdf = pw.Document();
     final missingActions = schemas.entries
         .expand((entry) => entry.value
-        .map((action) => {'schema': entry.key, 'action': action}))
+            .map((action) => {'schema': entry.key, 'action': action}))
         .where((item) => !completedActions.any((e) =>
-    e['schema'] == item['schema'] && e['action'] == item['action']))
+            e['schema'] == item['schema'] && e['action'] == item['action']))
         .toList();
     if (completedActions.isNotEmpty) {
       DateTime firstActionTime = completedActions.first['timestamp'];
@@ -221,8 +222,9 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
               pw.Text('Rettungsmittel:',
                   style: pw.TextStyle(
                       fontSize: 18, fontWeight: pw.FontWeight.bold)),
-              ...widget.vehicleStatus.entries
-                  .map((entry) => pw.Text(entry.value != 0
+              ...widget.vehicleStatus.entries.map((entry) => pw.Text(entry
+                          .value !=
+                      0
                   ? "${entry.key}: ${entry.value == 2 ? 'Auf Anfahrt' : entry.value == 1 ? 'Besetzt' : 'Frei'}"
                   : '')),
               pw.SizedBox(height: 20),
@@ -255,6 +257,15 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Schemata Auswahl - Zeit: $_elapsedSeconds s'),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.redAccent, Colors.blueAccent],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
       ),
       body: ListView(
         children: schemas.keys.map((schema) {
@@ -287,10 +298,26 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           );
         }).toList(),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: generatePDF,
-        child: Icon(Icons.print),
-      ),
+      floatingActionButton:
+          Column(mainAxisAlignment: MainAxisAlignment.end, children: [
+        FloatingActionButton(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) =>
+                    MeasuresOverviewScreen(completedActions: completedActions),
+              ),
+            );
+          },
+          child: const Icon(Icons.list),
+        ),
+        const SizedBox(height: 10),
+        FloatingActionButton(
+          onPressed: generatePDF,
+          child: const Icon(Icons.print),
+        ),
+      ]),
     );
   }
 }
