@@ -1,4 +1,4 @@
-package dev.floriang.rd_fallbeispiel.rd_fallbeispiel;
+package dev.floriang.rd_fallbeispiel_tool;
 
 import io.flutter.embedding.android.FlutterActivity;
 

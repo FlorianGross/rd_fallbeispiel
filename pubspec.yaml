@@ -2,7 +2,7 @@ name: rd_fallbeispiel
 description: "Eine Applikation, die beim erlernen der standardisierten Patientenversorgung helfen soll."
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ^3.5.3
@@ -15,6 +15,7 @@ dependencies:
   printing: ^5.13.4
   shared_preferences: ^2.4.0
   flutter_launcher_icons: ^0.14.1
+  intl: ^0.20.2
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true

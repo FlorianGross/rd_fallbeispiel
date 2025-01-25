@@ -81,8 +81,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     ],
     'A': [
       'Atemwege überprüfen',
-      'Absaugbereitschaft'
-          'Atemwegssicherung',
+      'Absaugbereitschaft',
+      'Atemwegssicherung',
     ],
     'B': [
       'Auskultieren',
@@ -113,8 +113,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       'Ödeme',
       'Verletzungen',
       'Einstichstellen',
-      'Insulinpumpe'
-          'Wärmeerhalt'
+      'Insulinpumpe',
+      'Wärmeerhalt'
     ],
     'BE-FAST': [
       'Balance',
@@ -304,16 +304,25 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           onPressed: () {
             Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (context) =>
-                    MeasuresOverviewScreen(completedActions: completedActions),
-              ),
+              MaterialPageRoute(builder: (context) {
+                final missingActions = schemas.entries
+                    .expand((entry) => entry.value.map(
+                        (action) => {'schema': entry.key, 'action': action}))
+                    .where((item) => !completedActions.any((e) =>
+                        e['schema'] == item['schema'] &&
+                        e['action'] == item['action']))
+                    .toList();
+                return MeasuresOverviewScreen(
+                    completedActions: completedActions,
+                    missingActions: missingActions);
+              }),
             );
           },
           child: const Icon(Icons.list),
         ),
         const SizedBox(height: 10),
         FloatingActionButton(
+          heroTag: null,
           onPressed: generatePDF,
           child: const Icon(Icons.print),
         ),
