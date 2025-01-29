@@ -4,7 +4,7 @@ class MeasuresOverviewScreen extends StatefulWidget {
   final List<Map<String, dynamic>> completedActions;
   final List<Map<String, dynamic>> missingActions;
 
-  MeasuresOverviewScreen(
+  const MeasuresOverviewScreen(
       {required this.completedActions, required this.missingActions});
 
   @override
@@ -17,8 +17,9 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
   @override
   initState() {
     super.initState();
-    firstTimeStamp = widget.completedActions[0]['timestamp'] as DateTime;
-    print(firstTimeStamp);
+    if(widget.completedActions.isNotEmpty) {
+      firstTimeStamp = widget.completedActions[0]['timestamp'] as DateTime;
+    }
   }
 
   @override
@@ -34,15 +35,33 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             ]),
           ),
           body: TabBarView(children: [
+            widget.completedActions.isEmpty
+                ? const Center(child: Text('Keine Maßnahmen durchgeführt'))
+                :
             ListView.builder(
               itemCount: widget.completedActions.length,
               itemBuilder: (context, index) {
                 final action = widget.completedActions[index];
+                if (index == 0) {
+                  firstTimeStamp =
+                      widget.completedActions[0]['timestamp'] as DateTime;
+                } else {
+                  firstTimeStamp = widget.completedActions[index - 1]
+                      ['timestamp'] as DateTime;
+                }
                 return ListTile(
-                  title: Text("${action['schema']} - ${action['action']}"),
-                  subtitle: Text("Seit Beginn: ${((action['timestamp'] as DateTime).difference(firstTimeStamp)).inSeconds} Sekunden"
-                      ""),
-                  //subtitle: Text("Zeitpunkt: ${action['timestamp']}"),
+                  title: Row(children: [
+                    Card(
+                      color: Colors.green,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10.0),
+                      ),
+                      child: Text('${action['schema']}'),
+                    ),
+                    Text("- ${action['action']}"),
+                  ]),
+                  subtitle: Text(
+                      "+ ${((action['timestamp'] as DateTime).difference(firstTimeStamp)).inSeconds} Sekunden"),
                 );
               },
             ),
@@ -51,7 +70,12 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
               itemBuilder: (context, index) {
                 final action = widget.missingActions[index];
                 return ListTile(
-                  title: Text("${action['schema']} - ${action['action']}"),
+                  title: Row(children: [
+                    Card(
+                      child: Text('${action['schema']}'),
+                    ),
+                    Text("- ${action['action']}"),
+                  ]),
                 );
               },
             ),

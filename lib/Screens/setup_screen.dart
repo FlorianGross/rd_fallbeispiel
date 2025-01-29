@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:rd_fallbeispiel/Screens/resuscitation_screen.dart';
 
-import 'SchemaSelectionScreen.dart';
+import 'normal_screen.dart';
 
 class QualificationSelectionScreen extends StatefulWidget {
+  const QualificationSelectionScreen({super.key});
+
   @override
   _QualificationSelectionScreenState createState() =>
       _QualificationSelectionScreenState();
@@ -10,10 +13,12 @@ class QualificationSelectionScreen extends StatefulWidget {
 
 class _QualificationSelectionScreenState
     extends State<QualificationSelectionScreen> {
-  final List<String> qualifications = ['SAN', 'RH', 'RS', 'NFS'];
+  final List<String> qualifications = ['SAN', 'RH', 'RS'];
   String selectedQualification = '';
   final List<String> vehicles = ['None', 'KTW', 'RTW', 'NEF', 'RTH'];
   Map<String, int> vehicleStatus = {};
+  late bool isResuscitation = false;
+  late bool isChildResuscitation = false;
 
   final Map<int, Color> statusColors = {
     0: Colors.grey,
@@ -59,7 +64,7 @@ class _QualificationSelectionScreenState
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: ListView(
-           children: [
+          children: [
             const Text('Qualifikationen',
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
@@ -82,7 +87,7 @@ class _QualificationSelectionScreenState
                     ),
                     child: Text(qualification,
                         style:
-                        const TextStyle(color: Colors.white, fontSize: 18)),
+                            const TextStyle(color: Colors.white, fontSize: 18)),
                   ),
                 );
               }).toList(),
@@ -106,19 +111,52 @@ class _QualificationSelectionScreenState
                     ),
                     child: Text(vehicle,
                         style:
-                        const TextStyle(color: Colors.white, fontSize: 18)),
+                            const TextStyle(color: Colors.white, fontSize: 18)),
                   ),
                 );
               }).toList(),
             ),
+            const SizedBox(height: 30),
+            const Text('Sonderoptionen',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Text('Reanimation', style: TextStyle(fontSize: 20)),
+                const SizedBox(width: 10),
+                Switch(
+                  value: isResuscitation,
+                  onChanged: (value) {
+                    setState(() {
+                      isResuscitation = value;
+                    });
+                  },
+                ),
+              ],
+            ),
+            isResuscitation
+                ? Row(
+                    children: [
+                      const Text('Säuglings- / Kinderreanimation', style: TextStyle(fontSize: 20)),
+                      const SizedBox(width: 10),
+                      Switch(
+                        value: isChildResuscitation,
+                        onChanged: (value) {
+                          setState(() {
+                            isChildResuscitation = value;
+                          });
+                        },
+                      ),
+                    ],
+                  )
+                : const SizedBox(),
             const SizedBox(height: 30),
             ElevatedButton(
               onPressed: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) =>
-                        SchemaSelectionScreen(vehicleStatus: vehicleStatus),
+                    builder: (context) => isResuscitation ? ResuscitationScreen(vehicleStatus: vehicleStatus, isChildResuscitation: isChildResuscitation,) : SchemaSelectionScreen(vehicleStatus: vehicleStatus),
                   ),
                 );
               },
@@ -130,5 +168,3 @@ class _QualificationSelectionScreenState
     );
   }
 }
-
-

@@ -4,19 +4,22 @@ import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:rd_fallbeispiel/Screens/result_screen.dart';
 
-import 'MeasuresOverviewScreen.dart';
-
-class SchemaSelectionScreen extends StatefulWidget {
+class ResuscitationScreen extends StatefulWidget {
   final Map<String, int> vehicleStatus;
+  final bool isChildResuscitation;
 
-  SchemaSelectionScreen({required this.vehicleStatus});
+  const ResuscitationScreen(
+      {super.key,
+      required this.vehicleStatus,
+      required this.isChildResuscitation});
 
   @override
-  _SchemaSelectionScreenState createState() => _SchemaSelectionScreenState();
+  _ResuscitationScreenState createState() => _ResuscitationScreenState();
 }
 
-class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
+class _ResuscitationScreenState extends State<ResuscitationScreen> {
   Map<String, List<String>> schemas = {
     'SSSS': [
       'Scene',
@@ -26,6 +29,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     ],
     'Erster Eindruck': [
       'Zyanose',
+      'Austreten Flüssigkeiten',
       'Hauttonus',
       'Pathologische Atemgeräusche',
       'Allgemeinzustand'
@@ -37,98 +41,28 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       'Bewusstlos',
     ],
     'c/x': [
-      'Abfrage kritische Blutungen',
+      'Kritische Blutungen',
     ],
     'a': [
-      'Überprüfung Atemwege',
+      'Atemwege Frei',
     ],
     'b': [
-      'Atemfrequenz',
-      'Atemzugvolumen',
+      'Atmung vorhanden',
     ],
     'c': [
-      'Pulsfrequenz',
-      'Tastbarkeit',
-      'Rythmik',
-      'Recap',
+      'Kreislauf vorhanden',
     ],
-    'STU': [
-      'Rückenlage',
-      'Kopf-Fixierung',
-      'Blutungen Kopf',
-      'Gesichtsknochen',
-      'Austritt Flüssigkeiten Nase',
-      'Austritt Flüssigkeiten Ohr',
-      'Pupillen Isokor',
-      'Battlesigns',
-      'HWS Stufenbildung',
-      'HWS Hartspann',
-      'Trachea zentral',
-      'Halsvenenstauung',
-      'Thorax 2 Ebenen',
-      'Auskultation',
-      'Abdomen Palpation',
-      'Abdomen Abwehrspannung',
-      'Abdomen Druckschmerz',
-      'Beckenstabilität',
-      'Oberschenkel Volumen',
-      'Oberschenkel 2 Ebenen',
-      'pDMS Beine',
-      'pDMS Arme',
-      'Achsengerechte Drehung',
-      'Rücken Stufenbildung',
-      'Rücken Hartspann'
+    '4H': [
+      'Hypovolämie',
+      'Hypoxie',
+      'Hypothermie',
+      'Hypo-/Hyperkaliämie oder Hypo-/Hyperglykämie',
     ],
-    'A': [
-      'Atemwege überprüfen',
-      'Absaugbereitschaft',
-      'Atemwegssicherung',
-    ],
-    'B': [
-      'Auskultieren',
-      'Atemhilfsmuskulatur',
-      'Sp02',
-      'Kontrollierte/Assistierte Beatmung',
-      'Sauerstoffgabe',
-    ],
-    'C': [
-      'Hauttonus',
-      'Blutdruck',
-      'Puls',
-      'Recap',
-      'EKG',
-      'Lagerung',
-      'Zugang IV / IO',
-      'Volumengabe',
-    ],
-    'D': [
-      'FAST',
-      'Pupillenkontrolle',
-      'GCS',
-      'BZ',
-    ],
-    'E': [
-      'Temperatur',
-      'Body-Check',
-      'Ödeme',
-      'Verletzungen',
-      'Einstichstellen',
-      'Insulinpumpe',
-      'Wärmeerhalt'
-    ],
-    'BE-FAST': [
-      'Balance',
-      'Eyes',
-      'Face',
-      'Arms',
-      'Speech',
-      'Time',
-    ],
-    'ZOPS': [
-      'Zeit',
-      'Ort',
-      'Person',
-      'Situation',
+    'HITS': [
+      'Herzbeuteltamponade',
+      'Intoxikation',
+      'Trombembolie',
+      'Spannungspneumothorax',
     ],
     'SAMPLERS': [
       'Symptome',
@@ -140,13 +74,22 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       'Risikofaktoren',
       'Schwangerschaft'
     ],
-    'OPQRST': [
-      'Onset',
-      'Provocation',
-      'Quality',
-      'Radiation',
-      'Severity',
-      'Time',
+    'Maßnahmen': [
+      'Sauerstoffgabe',
+      'Beatmung (kontrolliert/assistiert)',
+      'Intubation',
+      'Lagerung',
+      'Defibrillation',
+      'Reanimation',
+    ],
+    'Maßnahmen (erweitert)': [
+      'Zugang IV / IO',
+      'Volumengabe',
+      'Medikamentengabe',
+      'Thoraxdrainage',
+      'Perikardpunktion',
+      'Thorakotomie',
+      'Larynxtubus',
     ],
     'Nachforderung': [
       'NEF',
@@ -155,17 +98,54 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       'KTW',
       'Feuerwehr',
       'Polizei',
-      'THW',
-      'Wasserrettung',
-      'Bergwacht',
-      'SEG',
+      'PSNV',
       'Sonstige',
-    ]
+    ],
   };
+
+  // BPM Functionality
+  final List<DateTime> _tapTimestamps = [];
+  double _smoothedBPM = 0;
+
+  void _registerTap() {
+    final now = DateTime.now();
+    resuscitationStart ??= now;
+    setState(() {
+      _tapTimestamps.add(now);
+      if (_tapTimestamps.length > 5) {
+        _tapTimestamps.removeAt(0);
+      }
+      _calculateSmoothedBPM();
+    });
+  }
+
+  void _calculateSmoothedBPM() {
+    if (_tapTimestamps.length < 2) {
+      _smoothedBPM = 0;
+      return;
+    }
+
+    final intervals = <int>[];
+    for (int i = 1; i < _tapTimestamps.length; i++) {
+      intervals.add(
+          _tapTimestamps[i].difference(_tapTimestamps[i - 1]).inMilliseconds);
+    }
+
+    if (intervals.isEmpty) return;
+
+    final averageInterval =
+        intervals.reduce((a, b) => a + b) / intervals.length;
+    _smoothedBPM = 60000 / averageInterval;
+  }
+
+  double get _bpm => _smoothedBPM;
+
+  //Other
 
   List<Map<String, dynamic>> completedActions = [];
   late Timer _timer;
   int _elapsedSeconds = 0;
+  DateTime? resuscitationStart;
 
   // Set selectedVehicles to be finished
   void finishVehicles() {
@@ -234,6 +214,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
               ...completedActions.map((action) {
                 Duration diff = action['timestamp'].difference(firstActionTime);
                 String elapsedTime = "+${diff.inSeconds} Sekunden";
+                firstActionTime = action['timestamp'];
                 return pw.Text(
                     "$elapsedTime ${action['schema']} ${action['action']}");
               }),
@@ -256,7 +237,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Schemata Auswahl - Zeit: $_elapsedSeconds s'),
+        title: Text('Reanimation Schema - Zeit: $_elapsedSeconds s'),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -268,39 +249,71 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
         ),
       ),
       body: ListView(
-        children: schemas.keys.map((schema) {
-          bool allCompleted = schemas[schema]!.every((action) =>
-              completedActions
-                  .any((e) => e['schema'] == schema && e['action'] == action));
-          return Container(
-            color: allCompleted ? Colors.green : Colors.transparent,
-            child: ExpansionTile(
-              title: Text(schema),
-              backgroundColor: allCompleted ? Colors.green : Colors.transparent,
-              children: schemas[schema]!.map((action) {
-                bool isCompleted = completedActions
-                    .any((e) => e['schema'] == schema && e['action'] == action);
-                return ListTile(
-                  title: Text(action),
-                  tileColor: isCompleted ? Colors.green : Colors.grey,
-                  onTap: () {
-                    setState(() {
-                      completedActions.add({
-                        'schema': schema,
-                        'action': action,
-                        'timestamp': DateTime.now()
+        children: [
+          resuscitationStart != null
+              ? Card(
+                  child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          _bpm.toStringAsFixed(2),
+                          style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue),
+                        ),
+                        const Text(' BPM ', style: TextStyle(fontSize: 24)),
+                        Text(
+                          'Rea seit: ${DateTime.now().difference(resuscitationStart!).inSeconds} s',
+                          style: const TextStyle(fontSize: 24),
+                        ),
+                      ]),
+                )
+              : const SizedBox(),
+          ...schemas.keys.map((schema) {
+            bool allCompleted = schemas[schema]!.every((action) =>
+                completedActions.any(
+                    (e) => e['schema'] == schema && e['action'] == action));
+            return Container(
+              color: allCompleted ? Colors.green : Colors.transparent,
+              child: ExpansionTile(
+                title: Text(schema),
+                backgroundColor:
+                    allCompleted ? Colors.green : Colors.transparent,
+                children: schemas[schema]!.map((action) {
+                  bool isCompleted = completedActions.any(
+                      (e) => e['schema'] == schema && e['action'] == action);
+                  return ListTile(
+                    title: Text(action),
+                    tileColor: isCompleted ? Colors.green : Colors.grey,
+                    onTap: () {
+                      setState(() {
+                        completedActions.add({
+                          'schema': schema,
+                          'action': action,
+                          'timestamp': DateTime.now()
+                        });
                       });
-                    });
-                  },
-                );
-              }).toList(),
-            ),
-          );
-        }).toList(),
+                    },
+                  );
+                }).toList(),
+              ),
+            );
+          }),
+        ],
       ),
       floatingActionButton:
           Column(mainAxisAlignment: MainAxisAlignment.end, children: [
         FloatingActionButton(
+          heroTag: null,
+          onPressed: () {
+            _registerTap();
+          },
+          child: Icon(Icons.heart_broken_outlined),
+        ),
+        const SizedBox(height: 10),
+        FloatingActionButton(
+          heroTag: null,
           onPressed: () {
             Navigator.push(
               context,
