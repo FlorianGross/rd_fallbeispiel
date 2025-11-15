@@ -12,8 +12,8 @@ class ResuscitationScreen extends StatefulWidget {
 
   const ResuscitationScreen(
       {super.key,
-      required this.vehicleStatus,
-      required this.isChildResuscitation});
+        required this.vehicleStatus,
+        required this.isChildResuscitation});
 
   @override
   _ResuscitationScreenState createState() => _ResuscitationScreenState();
@@ -140,7 +140,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen> {
 
   double get _bpm => _smoothedBPM;
 
-  //Other
+  // Other
 
   List<Map<String, dynamic>> completedActions = [];
   late Timer _timer;
@@ -153,7 +153,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen> {
       widget.vehicleStatus.forEach((key, value) {
         if (value == 2 &&
             !completedActions.any(
-                (e) => e['schema'] == 'Nachforderung' && e['action'] == key)) {
+                    (e) => e['schema'] == 'Nachforderung' && e['action'] == key)) {
           completedActions.add({
             'schema': 'Nachforderung',
             'action': key,
@@ -185,9 +185,9 @@ class _ResuscitationScreenState extends State<ResuscitationScreen> {
     final pdf = pw.Document();
     final missingActions = schemas.entries
         .expand((entry) => entry.value
-            .map((action) => {'schema': entry.key, 'action': action}))
+        .map((action) => {'schema': entry.key, 'action': action}))
         .where((item) => !completedActions.any((e) =>
-            e['schema'] == item['schema'] && e['action'] == item['action']))
+    e['schema'] == item['schema'] && e['action'] == item['action']))
         .toList();
     if (completedActions.isNotEmpty) {
       DateTime firstActionTime = completedActions.first['timestamp'];
@@ -203,8 +203,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen> {
                   style: pw.TextStyle(
                       fontSize: 18, fontWeight: pw.FontWeight.bold)),
               ...widget.vehicleStatus.entries.map((entry) => pw.Text(entry
-                          .value !=
-                      0
+                  .value !=
+                  0
                   ? "${entry.key}: ${entry.value == 2 ? 'Auf Anfahrt' : entry.value == 1 ? 'Besetzt' : 'Frei'}"
                   : '')),
               pw.SizedBox(height: 20),
@@ -233,6 +233,78 @@ class _ResuscitationScreenState extends State<ResuscitationScreen> {
         onLayout: (PdfPageFormat format) async => pdf.save());
   }
 
+  // --------- NEU: Hinweis & Quellen gemäß Guideline 1.4.1 ---------
+
+  void _showMedicalSourcesDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Hinweis & Quellen'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Diese App stellt ausschließlich Fallbeispiele und '
+                    'Trainingsschemata für Ausbildung und Fortbildung im Rettungsdienst dar. '
+                    'Sie ersetzt keine medizinische Beratung, Diagnostik oder Therapieempfehlung.',
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Die hier dargestellten Schemata (z. B. SSSS, WASB, (c)ABCDE, '
+                    'SAMPLER, 4H/4T, Maßnahmen der Reanimation) orientieren sich u. a. an:',
+              ),
+              const SizedBox(height: 8),
+              _buildReferenceEntry(
+                'Drache D, Conrad A, Brand A, Frenzel J, Kaiserauer E. '
+                    '„retten – Rettungssanitäter“. Georg Thieme Verlag; 2024. '
+                    'Online: https://shop.thieme.de/retten-Rettungssanitaeter/9783132434684',
+              ),
+              const SizedBox(height: 4),
+              _buildReferenceEntry(
+                'Buschmann C (Hrsg.). „Das ABCDE-Schema der Patientensicherheit '
+                    'in der Notfallmedizin – Pearls and Pitfalls aus interdisziplinärer Sicht“. '
+                    'Kohlhammer Verlag.',
+              ),
+              const SizedBox(height: 4),
+              _buildReferenceEntry(
+                'European Resuscitation Council (ERC). „ERC Guidelines 2025 / '
+                    '2021 – Basic Life Support & Advanced Life Support“. '
+                    'Online: https://www.erc.edu',
+              ),
+              const SizedBox(height: 4),
+              _buildReferenceEntry(
+                'Thieme via medici / notfallmedizinische Basisdiagnostik '
+                    'mit (c)ABCDE- und SAMPLER-Schema.',
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Die Umsetzung im Rahmen dieser App dient ausschließlich dem '
+                    'strukturieren Training von Einsatzkräften.',
+                style: TextStyle(fontStyle: FontStyle.italic),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Schließen'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static Widget _buildReferenceEntry(String text) {
+    return Text(
+      '• $text',
+      style: const TextStyle(fontSize: 13),
+    );
+  }
+
+  // ---------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -247,42 +319,48 @@ class _ResuscitationScreenState extends State<ResuscitationScreen> {
             ),
           ),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            onPressed: _showMedicalSourcesDialog,
+          ),
+        ],
       ),
       body: ListView(
         children: [
           resuscitationStart != null
               ? Card(
-                  child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          _bpm.toStringAsFixed(2),
-                          style: const TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue),
-                        ),
-                        const Text(' BPM ', style: TextStyle(fontSize: 24)),
-                        Text(
-                          'Rea seit: ${DateTime.now().difference(resuscitationStart!).inSeconds} s',
-                          style: const TextStyle(fontSize: 24),
-                        ),
-                      ]),
-                )
+            child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _bpm.toStringAsFixed(2),
+                    style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue),
+                  ),
+                  const Text(' BPM ', style: TextStyle(fontSize: 24)),
+                  Text(
+                    'Rea seit: ${DateTime.now().difference(resuscitationStart!).inSeconds} s',
+                    style: const TextStyle(fontSize: 24),
+                  ),
+                ]),
+          )
               : const SizedBox(),
           ...schemas.keys.map((schema) {
             bool allCompleted = schemas[schema]!.every((action) =>
                 completedActions.any(
-                    (e) => e['schema'] == schema && e['action'] == action));
+                        (e) => e['schema'] == schema && e['action'] == action));
             return Container(
               color: allCompleted ? Colors.green : Colors.transparent,
               child: ExpansionTile(
                 title: Text(schema),
                 backgroundColor:
-                    allCompleted ? Colors.green : Colors.transparent,
+                allCompleted ? Colors.green : Colors.transparent,
                 children: schemas[schema]!.map((action) {
                   bool isCompleted = completedActions.any(
-                      (e) => e['schema'] == schema && e['action'] == action);
+                          (e) => e['schema'] == schema && e['action'] == action);
                   return ListTile(
                     title: Text(action),
                     tileColor: isCompleted ? Colors.green : Colors.grey,
@@ -303,13 +381,13 @@ class _ResuscitationScreenState extends State<ResuscitationScreen> {
         ],
       ),
       floatingActionButton:
-          Column(mainAxisAlignment: MainAxisAlignment.end, children: [
+      Column(mainAxisAlignment: MainAxisAlignment.end, children: [
         FloatingActionButton(
           heroTag: null,
           onPressed: () {
             _registerTap();
           },
-          child: Icon(Icons.heart_broken_outlined),
+          child: const Icon(Icons.heart_broken_outlined),
         ),
         const SizedBox(height: 10),
         FloatingActionButton(
@@ -322,8 +400,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen> {
                     .expand((entry) => entry.value.map(
                         (action) => {'schema': entry.key, 'action': action}))
                     .where((item) => !completedActions.any((e) =>
-                        e['schema'] == item['schema'] &&
-                        e['action'] == item['action']))
+                e['schema'] == item['schema'] &&
+                    e['action'] == item['action']))
                     .toList();
                 return MeasuresOverviewScreen(
                     completedActions: completedActions,
