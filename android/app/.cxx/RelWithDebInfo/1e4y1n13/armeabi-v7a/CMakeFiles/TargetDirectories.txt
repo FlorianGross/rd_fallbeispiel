@@ -1,0 +1,2 @@
+G:/rd_fallbeispiel/android/app/.cxx/RelWithDebInfo/1e4y1n13/armeabi-v7a/CMakeFiles/edit_cache.dir
+G:/rd_fallbeispiel/android/app/.cxx/RelWithDebInfo/1e4y1n13/armeabi-v7a/CMakeFiles/rebuild_cache.dir

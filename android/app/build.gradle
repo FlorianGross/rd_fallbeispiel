@@ -13,7 +13,7 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "dev.floriang.rd_fallbeispiel_tool"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "25.1.8937393"
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -112,6 +112,10 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   final List<DateTime> _tapTimestamps = [];
   double _smoothedBPM = 0;
 
+  // BPM History tracking for graph
+  List<Map<String, dynamic>> _bpmHistory = [];
+  List<Map<String, dynamic>> _ventilationHistory = [];
+
   // Ventilation tracking
   int _compressionCount = 0;
   int _ventilationCount = 0;
@@ -158,6 +162,14 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
       }
       _calculateSmoothedBPM();
 
+      // Record BPM history for graph
+      if (_bpm > 0) {
+        _bpmHistory.add({
+          'timestamp': now,
+          'bpm': _bpm,
+        });
+      }
+
       // Compression counting
       _compressionCount++;
       _cycleCompressions++;
@@ -176,8 +188,16 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     // Haptic feedback
     HapticFeedback.mediumImpact();
 
+    final now = DateTime.now();
+
     setState(() {
       _ventilationCount++;
+
+      // Record ventilation history for graph
+      _ventilationHistory.add({
+        'timestamp': now,
+        'count': _ventilationCount,
+      });
 
       // Handle initial ventilations for children
       if (widget.isChildResuscitation && !_initialVentilationsComplete) {
@@ -482,6 +502,10 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
               ),
               pw.SizedBox(height: 20),
 
+              // Reanimation Graph
+              _buildReanimationGraph(),
+              if (_bpmHistory.isNotEmpty) pw.SizedBox(height: 20),
+
               // Vehicle Status Section
               pw.Container(
                 padding: const pw.EdgeInsets.all(15),
@@ -750,6 +774,353 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           ),
         ],
       ),
+    );
+  }
+
+  pw.Widget _buildReanimationGraph() {
+    if (_bpmHistory.isEmpty || resuscitationStart == null) {
+      return pw.SizedBox.shrink();
+    }
+
+    final graphWidth = 480.0;
+    final graphHeight = 180.0;
+
+    // Calculate time range
+    final startTime = resuscitationStart!;
+    final endTime = _bpmHistory.last['timestamp'] as DateTime;
+    final totalSeconds = endTime.difference(startTime).inSeconds.toDouble();
+
+    if (totalSeconds <= 0) return pw.SizedBox.shrink();
+
+    // Calculate average BPM
+    final avgBPM = _bpmHistory.map((e) => e['bpm'] as double).reduce((a, b) => a + b) / _bpmHistory.length;
+
+    // Count BPM in ranges
+    int optimalCount = 0;
+    int acceptableCount = 0;
+    int poorCount = 0;
+
+    for (var data in _bpmHistory) {
+      final bpm = data['bpm'] as double;
+      if (bpm >= 100 && bpm <= 120) {
+        optimalCount++;
+      } else if (bpm >= 90 && bpm <= 130) {
+        acceptableCount++;
+      } else {
+        poorCount++;
+      }
+    }
+
+    final total = _bpmHistory.length;
+    final optimalPercent = (optimalCount / total * 100);
+    final acceptablePercent = (acceptableCount / total * 100);
+    final poorPercent = (poorCount / total * 100);
+
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(15),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.grey100,
+        border: pw.Border.all(color: PdfColors.grey400, width: 2),
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Row(
+            children: [
+              pw.Container(
+                width: 4,
+                height: 20,
+                color: PdfColors.purple,
+              ),
+              pw.SizedBox(width: 10),
+              pw.Text(
+                'REANIMATIONSQUALITÄT',
+                style: pw.TextStyle(
+                  fontSize: 16,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.purple900,
+                ),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 15),
+
+          // Statistics Row
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+            children: [
+              _buildQualityStatBox(
+                'Durchschnitt',
+                '${avgBPM.toStringAsFixed(0)} BPM',
+                avgBPM >= 100 && avgBPM <= 120 ? PdfColors.green :
+                avgBPM >= 90 && avgBPM <= 130 ? PdfColors.orange : PdfColors.red,
+              ),
+              _buildQualityStatBox(
+                'Messungen',
+                '$total',
+                PdfColors.blue,
+              ),
+              _buildQualityStatBox(
+                'Beatmungen',
+                '${_ventilationHistory.length}',
+                PdfColors.blue,
+              ),
+            ],
+          ),
+
+          pw.SizedBox(height: 15),
+
+          // Quality Bar Chart
+          pw.Container(
+            padding: const pw.EdgeInsets.all(10),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.white,
+              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  'Qualitätsverteilung:',
+                  style: pw.TextStyle(
+                    fontSize: 12,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 8),
+
+                // Optimal bar
+                _buildQualityBar(
+                  'Optimal (100-120 BPM)',
+                  optimalCount,
+                  optimalPercent,
+                  PdfColors.green,
+                  graphWidth - 20,
+                ),
+                pw.SizedBox(height: 6),
+
+                // Acceptable bar
+                _buildQualityBar(
+                  'Akzeptabel (90-130 BPM)',
+                  acceptableCount,
+                  acceptablePercent,
+                  PdfColors.orange,
+                  graphWidth - 20,
+                ),
+                pw.SizedBox(height: 6),
+
+                // Poor bar
+                _buildQualityBar(
+                  'Verbesserungsbedarf',
+                  poorCount,
+                  poorPercent,
+                  PdfColors.red,
+                  graphWidth - 20,
+                ),
+              ],
+            ),
+          ),
+
+          pw.SizedBox(height: 15),
+
+          // Timeline visualization
+          pw.Container(
+            padding: const pw.EdgeInsets.all(10),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.white,
+              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  'Zeitlicher Verlauf (${totalSeconds.toInt()}s Gesamtdauer):',
+                  style: pw.TextStyle(
+                    fontSize: 12,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 8),
+
+                // Visual timeline
+                pw.Container(
+                  height: 40,
+                  child: pw.Stack(
+                    children: [
+                      // Background bar
+                      pw.Container(
+                        height: 20,
+                        decoration: pw.BoxDecoration(
+                          color: PdfColors.grey300,
+                          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
+                        ),
+                      ),
+
+                      // BPM quality segments
+                      pw.Row(
+                        children: _bpmHistory.asMap().entries.map((entry) {
+                          final data = entry.value;
+                          final bpm = data['bpm'] as double;
+
+                          PdfColor color;
+                          if (bpm >= 100 && bpm <= 120) {
+                            color = PdfColors.green;
+                          } else if (bpm >= 90 && bpm <= 130) {
+                            color = PdfColors.orange;
+                          } else {
+                            color = PdfColors.red;
+                          }
+
+                          return pw.Expanded(
+                            child: pw.Container(
+                              height: 20,
+                              decoration: pw.BoxDecoration(
+                                color: color,
+                                border: pw.Border.all(color: PdfColors.white, width: 0.5),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+
+                      // Ventilation markers
+                      ..._ventilationHistory.map((ventilation) {
+                        final ventTime = (ventilation['timestamp'] as DateTime).difference(startTime).inSeconds;
+                        final position = (ventTime / totalSeconds) * (graphWidth - 20);
+
+                        return pw.Positioned(
+                          left: position,
+                          top: 0,
+                          child: pw.Container(
+                            width: 3,
+                            height: 40,
+                            color: PdfColors.blue,
+                          ),
+                        );
+                      }).toList(),
+                    ],
+                  ),
+                ),
+
+                pw.SizedBox(height: 8),
+
+                // Timeline labels
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Start', style: const pw.TextStyle(fontSize: 9)),
+                    pw.Text('${(totalSeconds / 2).toInt()}s', style: const pw.TextStyle(fontSize: 9)),
+                    pw.Text('Ende (${totalSeconds.toInt()}s)', style: const pw.TextStyle(fontSize: 9)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          pw.SizedBox(height: 10),
+
+          // Legend
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.center,
+            children: [
+              _buildLegendItem(PdfColors.green, 'Optimal'),
+              pw.SizedBox(width: 10),
+              _buildLegendItem(PdfColors.orange, 'Akzeptabel'),
+              pw.SizedBox(width: 10),
+              _buildLegendItem(PdfColors.red, 'Verbesserungsbedarf'),
+              pw.SizedBox(width: 10),
+              _buildLegendItem(PdfColors.blue, 'Beatmung'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _buildQualityStatBox(String label, String value, PdfColor color) {
+    return pw.Container(
+      width: 140,
+      padding: const pw.EdgeInsets.all(10),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.white,
+        border: pw.Border.all(color: color, width: 2),
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+      ),
+      child: pw.Column(
+        children: [
+          pw.Text(
+            value,
+            style: pw.TextStyle(
+              fontSize: 18,
+              fontWeight: pw.FontWeight.bold,
+              color: color,
+            ),
+          ),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontSize: 9,
+              color: PdfColors.grey700,
+            ),
+            textAlign: pw.TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _buildQualityBar(String label, int count, double percent, PdfColor color, double maxWidth) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(label, style: const pw.TextStyle(fontSize: 10)),
+            pw.Text('$count (${percent.toStringAsFixed(1)}%)',
+                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+          ],
+        ),
+        pw.SizedBox(height: 3),
+        pw.Container(
+          height: 20,
+          decoration: pw.BoxDecoration(
+            color: PdfColors.grey200,
+            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
+          ),
+          child: pw.Row(
+            children: [
+              pw.Container(
+                width: maxWidth * (percent / 100),
+                decoration: pw.BoxDecoration(
+                  color: color,
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  pw.Widget _buildLegendItem(PdfColor color, String label) {
+    return pw.Row(
+      mainAxisSize: pw.MainAxisSize.min,
+      children: [
+        pw.Container(
+          width: 15,
+          height: 3,
+          color: color,
+        ),
+        pw.SizedBox(width: 4),
+        pw.Text(
+          label,
+          style: const pw.TextStyle(fontSize: 8),
+        ),
+      ],
     );
   }
 
@@ -1119,7 +1490,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             label,
             style: TextStyle(
               fontSize: 12,
-              color: Colors.grey.shade600,
+              color: Colors.grey.shade700,
             ),
           ),
         ],
@@ -1283,8 +1654,14 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                       e['action'] == item['action']))
                       .toList();
                   return MeasuresOverviewScreen(
-                      completedActions: completedActions,
-                      missingActions: missingActions);
+                    completedActions: completedActions,
+                    missingActions: missingActions,
+                    bpmHistory: _bpmHistory,
+                    ventilationHistory: _ventilationHistory,
+                    compressionCount: _compressionCount,
+                    ventilationCount: _ventilationCount,
+                    resuscitationStart: resuscitationStart,
+                  );
                 }),
               );
             },
