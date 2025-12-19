@@ -5,16 +5,19 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../measure_requirements.dart';
 import 'result_screen.dart';
 
 class SchemaSelectionScreen extends StatefulWidget {
   final Map<String, int> vehicleStatus;
   final Map<String, DateTime?> vehicleArrivalTimes;
+  final Qualification userQualification;
 
   const SchemaSelectionScreen({
     super.key,
     required this.vehicleStatus,
     required this.vehicleArrivalTimes,
+    required this.userQualification,
   });
 
   @override
@@ -22,164 +25,14 @@ class SchemaSelectionScreen extends StatefulWidget {
 }
 
 class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
-  Map<String, List<String>> schemas = {
-    'SSSS': [
-      'Scene',
-      'Safety',
-      'Situation',
-      'Support',
-    ],
-    'Erster Eindruck': [
-      'Zyanose',
-      'Austreten Flüssigkeiten',
-      'Hauttonus',
-      'Pathologische Atemgeräusche',
-      'Allgemeinzustand'
-    ],
-    'WASB': [
-      'Wach',
-      'Ansprechbar',
-      'Schmerzreiz',
-      'Bewusstlos',
-    ],
-    'c/x': [
-      'Kritische Blutungen',
-    ],
-    'a': [
-      'Atemwege Frei',
-      'Schleimhautfarbe',
-      'Schleimhautfeuchtigkeit',
-      'Zahnstatus',
-    ],
-    'b': [
-      'Atemfrequenz',
-      'Atemzugvolumen',
-    ],
-    'c': [
-      'Pulsfrequenz',
-      'Tastbarkeit',
-      'Rythmik',
-      'Recap',
-    ],
-    'STU': [
-      'Rückenlage',
-      'Kopf-Fixierung',
-      'Blutungen Kopf',
-      'Gesichtsknochen',
-      'Austritt Flüssigkeiten Nase',
-      'Austritt Flüssigkeiten Ohr',
-      'Pupillen Isokor',
-      'Battlesigns',
-      'HWS Stufenbildung',
-      'HWS Hartspann',
-      'Trachea zentral',
-      'Halsvenenstauung',
-      'Thorax 2 Ebenen',
-      'Auskultation',
-      'Abdomen Palpation',
-      'Abdomen Abwehrspannung',
-      'Abdomen Druckschmerz',
-      'Beckenstabilität',
-      'Oberschenkel Volumen',
-      'Oberschenkel 2 Ebenen',
-      'pDMS Beine',
-      'pDMS Arme',
-      'Achsengerechte Drehung',
-      'Rücken Stufenbildung',
-      'Rücken Hartspann',
-    ],
-    'A': [
-      'Reevaluation Atemwege',
-    ],
-    'B': [
-      'Auskultation Beidseits',
-      'Auskultation Atemgeräusche',
-      'Atemhilfsmuskulatur',
-      'Sp02',
-      'etCO2',
-      'Atemmuster',
-    ],
-    'C': [
-      'Blutdruck',
-      'Puls',
-      'Recap',
-      'EKG',
-    ],
-    'D': [
-      'Pupillenkontrolle',
-      'GCS',
-      'BZ',
-    ],
-    'E': [
-      'Temperatur',
-      'Body-Check',
-      'Exikkose',
-      'Ödeme',
-      'Verletzungen',
-      'Einstichstellen',
-      'Insulinpumpe',
-      'Wärmeerhalt'
-    ],
-    'BE-FAST': [
-      'Balance',
-      'Eyes',
-      'Face',
-      'Arms',
-      'Speech',
-      'Time',
-    ],
-    'ZOPS': [
-      'Zeit',
-      'Ort',
-      'Person',
-      'Situation',
-    ],
-    'SAMPLERS': [
-      'Symptome',
-      'Allergien',
-      'Medikamente',
-      'Patientenvorgeschichte',
-      'Letzte Mahlzeit / Flüssigkeits Aufnahme,...',
-      'Ereignis',
-      'Risikofaktoren',
-      'Schwangerschaft'
-    ],
-    'OPQRST': [
-      'Onset',
-      'Provocation',
-      'Quality',
-      'Radiation',
-      'Severity',
-      'Time',
-    ],
-    'Maßnahmen': [
-      'Sauerstoffgabe',
-      'Beatmung (kontrolliert/assistiert)',
-      'Intubation',
-      'Lagerung',
-      'Defibrillation',
-      'Reanimation',
-    ],
-    'Maßnahmen (erweitert)': [
-      'Zugang IV / IO',
-      'Volumengabe',
-      'Medikamentengabe',
-      'Thoraxdrainage',
-      'Perikardpunktion',
-      'Thorakotomie',
-      'Larynxtubus',
-    ],
-    'Nachforderung': [
-      'NEF',
-      'RTW',
-      'RTH',
-      'KTW',
-      'Feuerwehr',
-      'Polizei',
-      'PSNV',
-      'Sonstige',
-    ],
-  };
+  // Verwende die Requirements aus dem Model
+  Map<String, List<String>> get schemas {
+    Map<String, List<String>> result = {};
+    MeasureRequirements.requirements.forEach((schema, requirements) {
+      result[schema] = requirements.map((req) => req.action).toList();
+    });
+    return result;
+  }
 
   List<Map<String, dynamic>> completedActions = [];
   late Timer _timer;
@@ -223,6 +76,13 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     finishVehicles();
   }
 
+  @override
+  void dispose() {
+    _timer.cancel();
+    _arrivalCheckTimer.cancel();
+    super.dispose();
+  }
+
   void _checkVehicleArrivals() {
     final now = DateTime.now();
     widget.vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
@@ -251,26 +111,38 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
+                color: Colors.green.shade50,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue, width: 2),
+                border: Border.all(color: Colors.green.shade200, width: 2),
               ),
-              child: Text(
-                vehicle,
-                style: const TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue,
-                ),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle,
+                      color: Colors.green.shade700, size: 48),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          vehicle,
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade900,
+                          ),
+                        ),
+                        const Text(
+                          'ist eingetroffen!',
+                          style: TextStyle(fontSize: 16),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'ist am Einsatzort angekommen.',
-              style: TextStyle(fontSize: 16),
-              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -278,163 +150,114 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
             ),
-            child: const Text(
-              'Verstanden',
-              style: TextStyle(fontSize: 16, color: Colors.white),
-            ),
+            child: const Text('Verstanden'),
           ),
         ],
       ),
     );
   }
 
-  @override
-  void dispose() {
-    _timer.cancel();
-    _arrivalCheckTimer.cancel();
-    super.dispose();
-  }
-
-  void generatePDF() async {
+  Future<void> generatePDF() async {
     final pdf = pw.Document();
-    final missingActions = schemas.entries
-        .expand((entry) => entry.value
-        .map((action) => {'schema': entry.key, 'action': action}))
-        .where((item) => !completedActions.any(
-            (e) => e['schema'] == item['schema'] && e['action'] == item['action']))
-        .toList();
 
-    if (completedActions.isNotEmpty) {
-      DateTime firstActionTime = completedActions.first['timestamp'];
-      final now = DateTime.now();
+    // Calculate missing actions based on user qualification
+    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
+      completedActions,
+      widget.userQualification,
+    );
 
+    // Sort completed actions by timestamp
+    final sortedCompleted = List<Map<String, dynamic>>.from(completedActions);
+    sortedCompleted.sort((a, b) {
+      final timeA = a['timestamp'] as DateTime;
+      final timeB = b['timestamp'] as DateTime;
+      return timeA.compareTo(timeB);
+    });
+
+    final now = DateTime.now();
+    final firstTimeStamp = sortedCompleted.isNotEmpty
+        ? sortedCompleted[0]['timestamp'] as DateTime
+        : now;
+
+    if (sortedCompleted.isNotEmpty) {
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(40),
           build: (pw.Context context) {
             return [
-              // Header with gradient-like effect
+              // Header
               pw.Container(
                 padding: const pw.EdgeInsets.all(20),
                 decoration: pw.BoxDecoration(
-                  color: PdfColors.blue900,
+                  gradient: const pw.LinearGradient(
+                    colors: [PdfColors.red300, PdfColors.blue300],
+                  ),
                   borderRadius: const pw.BorderRadius.all(pw.Radius.circular(10)),
                 ),
                 child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text(
-                      'PATIENTENVERSORGUNGSBERICHT',
+                      'TRAININGSBERICHT PATIENTENVERSORGUNG',
                       style: pw.TextStyle(
-                        fontSize: 28,
+                        fontSize: 20,
                         fontWeight: pw.FontWeight.bold,
                         color: PdfColors.white,
                       ),
                     ),
                     pw.SizedBox(height: 8),
                     pw.Text(
-                      'Strukturierte Patientenversorgung',
-                      style: pw.TextStyle(
+                      'Qualifikation: ${widget.userQualification.name}',
+                      style: const pw.TextStyle(
                         fontSize: 14,
-                        color: PdfColors.grey300,
+                        color: PdfColors.white,
                       ),
                     ),
                     pw.SizedBox(height: 4),
                     pw.Text(
-                      'Erstellt: ${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year} um ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')} Uhr',
-                      style: pw.TextStyle(
-                        fontSize: 11,
-                        color: PdfColors.grey300,
+                      'Erstellt am: ${now.day}.${now.month}.${now.year} um ${now.hour}:${now.minute.toString().padLeft(2, '0')} Uhr',
+                      style: const pw.TextStyle(
+                        fontSize: 12,
+                        color: PdfColors.white,
                       ),
                     ),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 25),
-
-              // Summary Statistics
-              pw.Container(
-                padding: const pw.EdgeInsets.all(15),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.green50,
-                  border: pw.Border.all(color: PdfColors.green200, width: 2),
-                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-                ),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildStatBox('Durchgeführt', '${completedActions.length}', PdfColors.green),
-                    _buildStatBox('Fehlend', '${missingActions.length}', PdfColors.orange),
-                    _buildStatBox('Dauer', '${_elapsedSeconds ~/ 60} min', PdfColors.blue),
                   ],
                 ),
               ),
               pw.SizedBox(height: 20),
 
-              // Vehicle Status Section
-              if (widget.vehicleStatus.entries.any((e) => e.value != 0)) ...[
-                pw.Container(
-                  padding: const pw.EdgeInsets.all(15),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.blue50,
-                    border: pw.Border.all(color: PdfColors.blue200, width: 2),
-                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+              // Statistics Row
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildStatBox(
+                    'Durchgeführt',
+                    '${completedActions.length}',
+                    PdfColors.green,
                   ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Row(
-                        children: [
-                          pw.Container(
-                            width: 4,
-                            height: 20,
-                            color: PdfColors.blue,
-                          ),
-                          pw.SizedBox(width: 10),
-                          pw.Text(
-                            'RETTUNGSMITTEL',
-                            style: pw.TextStyle(
-                              fontSize: 16,
-                              fontWeight: pw.FontWeight.bold,
-                              color: PdfColors.blue900,
-                            ),
-                          ),
-                        ],
-                      ),
-                      pw.SizedBox(height: 10),
-                      ...widget.vehicleStatus.entries
-                          .where((entry) => entry.value != 0)
-                          .map((entry) => pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 3),
-                        child: pw.Row(
-                          children: [
-                            pw.Container(
-                              width: 8,
-                              height: 8,
-                              decoration: pw.BoxDecoration(
-                                color: entry.value == 2 ? PdfColors.red : PdfColors.blue,
-                                shape: pw.BoxShape.circle,
-                              ),
-                            ),
-                            pw.SizedBox(width: 8),
-                            pw.Text(
-                              "${entry.key}: ${entry.value == 2 ? 'Auf Anfahrt' : 'Besetzt'}",
-                              style: const pw.TextStyle(fontSize: 11),
-                            ),
-                          ],
-                        ),
-                      )),
-                    ],
+                  _buildStatBox(
+                    'Fehlend',
+                    '${missingActions.length}',
+                    PdfColors.orange,
                   ),
-                ),
-                pw.SizedBox(height: 20),
-              ],
+                  _buildStatBox(
+                    'Gesamt',
+                    '${completedActions.length + missingActions.length}',
+                    PdfColors.blue,
+                  ),
+                  _buildStatBox(
+                    'Dauer',
+                    '$_elapsedSeconds s',
+                    PdfColors.purple,
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 20),
 
-              // Timeline Section
+              // Completed Actions Section
               pw.Container(
                 padding: const pw.EdgeInsets.all(15),
                 decoration: pw.BoxDecoration(
@@ -454,7 +277,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                         ),
                         pw.SizedBox(width: 10),
                         pw.Text(
-                          'MASSNAHMEN-PROTOKOLL (${completedActions.length} durchgeführt)',
+                          'DURCHGEFÜHRTE MASSNAHMEN (${completedActions.length})',
                           style: pw.TextStyle(
                             fontSize: 16,
                             fontWeight: pw.FontWeight.bold,
@@ -463,38 +286,33 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                         ),
                       ],
                     ),
-                    pw.SizedBox(height: 12),
-                    ...completedActions.asMap().entries.map((entry) {
+                    pw.SizedBox(height: 10),
+                    ...sortedCompleted.asMap().entries.map((entry) {
                       final index = entry.key;
                       final action = entry.value;
-                      Duration diff = action['timestamp'].difference(firstActionTime);
-                      String elapsedTime = "+${diff.inMinutes}:${(diff.inSeconds % 60).toString().padLeft(2, '0')} min";
-                      firstActionTime = action['timestamp'];
+                      final timestamp = action['timestamp'] as DateTime;
+                      final elapsed = timestamp.difference(firstTimeStamp);
+                      final elapsedTime =
+                          '+${elapsed.inMinutes}:${(elapsed.inSeconds % 60).toString().padLeft(2, '0')} min';
 
                       return pw.Container(
-                        margin: const pw.EdgeInsets.only(bottom: 6),
+                        margin: const pw.EdgeInsets.symmetric(vertical: 3),
                         padding: const pw.EdgeInsets.all(8),
                         decoration: pw.BoxDecoration(
-                          color: index % 2 == 0 ? PdfColors.white : PdfColors.green100,
+                          color: index % 2 == 0 ? PdfColors.white : PdfColors.grey100,
                           borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
                         ),
                         child: pw.Row(
                           children: [
                             pw.Container(
-                              width: 24,
-                              height: 24,
-                              decoration: pw.BoxDecoration(
-                                color: PdfColors.green,
-                                shape: pw.BoxShape.circle,
-                              ),
-                              child: pw.Center(
-                                child: pw.Text(
-                                  '${index + 1}',
-                                  style: pw.TextStyle(
-                                    color: PdfColors.white,
-                                    fontSize: 10,
-                                    fontWeight: pw.FontWeight.bold,
-                                  ),
+                              width: 25,
+                              alignment: pw.Alignment.center,
+                              child: pw.Text(
+                                '${index + 1}.',
+                                style: pw.TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: pw.FontWeight.bold,
+                                  color: PdfColors.grey700,
                                 ),
                               ),
                             ),
@@ -538,7 +356,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                 ),
               ),
 
-              // Missing Actions Section (only if there are any)
+              // Missing Actions Section (only required ones for this qualification)
               if (missingActions.isNotEmpty) ...[
                 pw.SizedBox(height: 20),
                 pw.Container(
@@ -560,7 +378,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                           ),
                           pw.SizedBox(width: 10),
                           pw.Text(
-                            'FEHLENDE MASSNAHMEN (${missingActions.length})',
+                            'FEHLENDE VERPFLICHTENDE MASSNAHMEN (${missingActions.length})',
                             style: pw.TextStyle(
                               fontSize: 16,
                               fontWeight: pw.FontWeight.bold,
@@ -844,9 +662,15 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Calculate missing required actions for this user
+    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
+      completedActions,
+      widget.userQualification,
+    );
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('Schemata Auswahl - Zeit: $_elapsedSeconds s'),
+        title: Text('Schemata - Zeit: $_elapsedSeconds s (${widget.userQualification.name})'),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -864,16 +688,11 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) {
-                  final missingActions = schemas.entries
-                      .expand((entry) => entry.value.map(
-                          (action) => {'schema': entry.key, 'action': action}))
-                      .where((item) => !completedActions.any((e) =>
-                  e['schema'] == item['schema'] &&
-                      e['action'] == item['action']))
-                      .toList();
                   return MeasuresOverviewScreen(
-                      completedActions: completedActions,
-                      missingActions: missingActions);
+                    completedActions: completedActions,
+                    missingActions: missingActions,
+                    userQualification: widget.userQualification,
+                  );
                 }),
               );
             },
@@ -967,27 +786,76 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                   children: schemas[schema]!.map((action) {
                     bool isCompleted = completedActions.any(
                             (e) => e['schema'] == schema && e['action'] == action);
+
+                    // Get requirement info
+                    final requirement = MeasureRequirements.getRequirement(schema, action);
+                    final isOptional = requirement?.isOptionalFor(widget.userQualification) ?? false;
+                    final canPerform = requirement?.canPerformWithQualification(widget.userQualification) ?? true;
+                    final requirementLevel = requirement?.getRequirementLevel(widget.userQualification);
+
                     return Container(
                       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(8),
                         color: isCompleted
                             ? Colors.green.shade100
-                            : Colors.grey.shade100,
+                            : (isOptional ? Colors.blue.shade50 : Colors.grey.shade100),
+                        border: isOptional && !isCompleted
+                            ? Border.all(color: Colors.blue.shade300, width: 1.5)
+                            : null,
                       ),
                       child: ListTile(
-                        leading: Icon(
-                          isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
-                          color: isCompleted ? Colors.green : Colors.grey,
+                        leading: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
+                              color: isCompleted ? Colors.green : (isOptional ? Colors.blue : Colors.grey),
+                            ),
+                            if (isOptional && !isCompleted) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.help_outline,
+                                  color: Colors.blue.shade600, size: 16),
+                            ],
+                            if (!canPerform) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.lock,
+                                  color: Colors.orange.shade700, size: 16),
+                            ],
+                          ],
                         ),
                         title: Text(
                           action,
                           style: TextStyle(
-                            color: isCompleted ? Colors.green.shade900 : Colors.black87,
+                            color: isCompleted
+                                ? Colors.green.shade900
+                                : (!canPerform ? Colors.grey.shade600 : Colors.black87),
                             fontWeight: isCompleted ? FontWeight.w500 : FontWeight.normal,
+                            decoration: !canPerform ? TextDecoration.lineThrough : null,
                           ),
                         ),
-                        onTap: isCompleted
+                        subtitle: !canPerform
+                            ? Text(
+                          'Nicht verfügbar für ${widget.userQualification.name}',
+                          style: TextStyle(
+                            color: Colors.orange.shade700,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        )
+                            : (isOptional
+                            ? Text(
+                          requirementLevel == RequirementLevel.expected ? 'Erwartet' : 'Optional',
+                          style: TextStyle(
+                            color: requirementLevel == RequirementLevel.expected
+                                ? Colors.amber.shade700
+                                : Colors.blue.shade700,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        )
+                            : null),
+                        onTap: (isCompleted || !canPerform)
                             ? null
                             : () {
                           setState(() {

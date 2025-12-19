@@ -7,16 +7,20 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:rd_fallbeispiel/Screens/result_screen.dart';
 
+import '../measure_requirements.dart';
+
 class ResuscitationScreen extends StatefulWidget {
   final Map<String, int> vehicleStatus;
   final bool isChildResuscitation;
   final Map<String, DateTime?> vehicleArrivalTimes;
+  final Qualification userQualification;
 
   const ResuscitationScreen({
     super.key,
     required this.vehicleStatus,
     required this.isChildResuscitation,
     required this.vehicleArrivalTimes,
+    required this.userQualification,
   });
 
   @override
@@ -25,88 +29,13 @@ class ResuscitationScreen extends StatefulWidget {
 
 class _ResuscitationScreenState extends State<ResuscitationScreen>
     with TickerProviderStateMixin {
-  Map<String, List<String>> schemas = {
-    'SSSS': [
-      'Scene',
-      'Safety',
-      'Situation',
-      'Support',
-    ],
-    'Erster Eindruck': [
-      'Zyanose',
-      'Austreten Flüssigkeiten',
-      'Hauttonus',
-      'Pathologische Atemgeräusche',
-      'Allgemeinzustand'
-    ],
-    'WASB': [
-      'Wach',
-      'Ansprechbar',
-      'Schmerzreiz',
-      'Bewusstlos',
-    ],
-    'c/x': [
-      'Kritische Blutungen',
-    ],
-    'a': [
-      'Atemwege Frei',
-    ],
-    'b': [
-      'Atmung vorhanden',
-    ],
-    'c': [
-      'Kreislauf vorhanden',
-    ],
-    '4H': [
-      'Hypovolämie',
-      'Hypoxie',
-      'Hypothermie',
-      'Hypo-/Hyperkaliämie oder Hypo-/Hyperglykämie',
-    ],
-    'HITS': [
-      'Herzbeuteltamponade',
-      'Intoxikation',
-      'Trombembolie',
-      'Spannungspneumothorax',
-    ],
-    'SAMPLERS': [
-      'Symptome',
-      'Allergien',
-      'Medikamente',
-      'Patientenvorgeschichte',
-      'Letzte Mahlzeit / Flüssigkeits Aufnahme,...',
-      'Ereignis',
-      'Risikofaktoren',
-      'Schwangerschaft'
-    ],
-    'Maßnahmen': [
-      'Sauerstoffgabe',
-      'Beatmung (kontrolliert/assistiert)',
-      'Intubation',
-      'Lagerung',
-      'Defibrillation',
-      'Reanimation',
-    ],
-    'Maßnahmen (erweitert)': [
-      'Zugang IV / IO',
-      'Volumengabe',
-      'Medikamentengabe',
-      'Thoraxdrainage',
-      'Perikardpunktion',
-      'Thorakotomie',
-      'Larynxtubus',
-    ],
-    'Nachforderung': [
-      'NEF',
-      'RTW',
-      'RTH',
-      'KTW',
-      'Feuerwehr',
-      'Polizei',
-      'PSNV',
-      'Sonstige',
-    ],
-  };
+  Map<String, List<String>> get schemas {
+    Map<String, List<String>> result = {};
+    MeasureRequirements.requirements.forEach((schema, requirements) {
+      result[schema] = requirements.map((req) => req.action).toList();
+    });
+    return result;
+  }
 
   // BPM Functionality
   final List<DateTime> _tapTimestamps = [];
@@ -389,12 +318,10 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
   void generatePDF() async {
     final pdf = pw.Document();
-    final missingActions = schemas.entries
-        .expand((entry) => entry.value
-        .map((action) => {'schema': entry.key, 'action': action}))
-        .where((item) => !completedActions
-        .any((e) => e['schema'] == item['schema'] && e['action'] == item['action']))
-        .toList();
+    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
+      completedActions,
+      widget.userQualification,
+    );
 
     if (completedActions.isNotEmpty) {
       DateTime firstActionTime = completedActions.first['timestamp'];
@@ -430,6 +357,15 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                       style: pw.TextStyle(
                         fontSize: 14,
                         color: PdfColors.grey300,
+                      ),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text(
+                      'Qualifikation: ${widget.userQualification.name}',
+                      style: pw.TextStyle(
+                        fontSize: 14,
+                        color: PdfColors.white,
+                        fontWeight: pw.FontWeight.bold,
                       ),
                     ),
                     pw.SizedBox(height: 4),
@@ -1628,7 +1564,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Reanimation Schema - Zeit: $_elapsedSeconds s'),
+        title: Text('Reanimation - Zeit: $_elapsedSeconds s (${widget.userQualification.name})'),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -1646,16 +1582,14 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) {
-                  final missingActions = schemas.entries
-                      .expand((entry) => entry.value.map(
-                          (action) => {'schema': entry.key, 'action': action}))
-                      .where((item) => !completedActions.any((e) =>
-                  e['schema'] == item['schema'] &&
-                      e['action'] == item['action']))
-                      .toList();
+                  final missingActions = MeasureRequirements.calculateMissingRequiredActions(
+                    completedActions,
+                    widget.userQualification,
+                  );
                   return MeasuresOverviewScreen(
                     completedActions: completedActions,
                     missingActions: missingActions,
+                    userQualification: widget.userQualification,
                     bpmHistory: _bpmHistory,
                     ventilationHistory: _ventilationHistory,
                     compressionCount: _compressionCount,
@@ -1743,27 +1677,74 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   children: schemas[schema]!.map((action) {
                     bool isCompleted = completedActions.any(
                             (e) => e['schema'] == schema && e['action'] == action);
+
+                    // Get requirement info
+                    final requirement = MeasureRequirements.getRequirement(schema, action);
+                    final isOptional = requirement?.isOptionalFor(widget.userQualification) ?? false;
+                    final canPerform = requirement?.canPerformWithQualification(widget.userQualification) ?? true;
+                    final requirementLevel = requirement?.getRequirementLevel(widget.userQualification);
+
                     return Container(
                       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(8),
                         color: isCompleted
                             ? Colors.green.shade100
-                            : Colors.grey.shade100,
+                            : (isOptional ? Colors.blue.shade50 : Colors.grey.shade100),
+                        border: isOptional && !isCompleted
+                            ? Border.all(color: Colors.blue.shade300, width: 1.5)
+                            : null,
                       ),
                       child: ListTile(
-                        leading: Icon(
-                          isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
-                          color: isCompleted ? Colors.green : Colors.grey,
+                        leading: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
+                              color: isCompleted ? Colors.green : (isOptional ? Colors.blue : Colors.grey),
+                            ),
+                            if (isOptional && !isCompleted) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.help_outline, color: Colors.blue.shade600, size: 16),
+                            ],
+                            if (!canPerform) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.lock, color: Colors.orange.shade700, size: 16),
+                            ],
+                          ],
                         ),
                         title: Text(
                           action,
                           style: TextStyle(
-                            color: isCompleted ? Colors.green.shade900 : Colors.black87,
+                            color: isCompleted
+                                ? Colors.green.shade900
+                                : (!canPerform ? Colors.grey.shade600 : Colors.black87),
                             fontWeight: isCompleted ? FontWeight.w500 : FontWeight.normal,
+                            decoration: !canPerform ? TextDecoration.lineThrough : null,
                           ),
                         ),
-                        onTap: isCompleted
+                        subtitle: !canPerform
+                            ? Text(
+                          'Nicht verfügbar für ${widget.userQualification.name}',
+                          style: TextStyle(
+                            color: Colors.orange.shade700,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        )
+                            : (isOptional
+                            ? Text(
+                          requirementLevel == RequirementLevel.expected ? 'Erwartet' : 'Optional',
+                          style: TextStyle(
+                            color: requirementLevel == RequirementLevel.expected
+                                ? Colors.amber.shade700
+                                : Colors.blue.shade700,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        )
+                            : null),
+                        onTap: (isCompleted || !canPerform)
                             ? null
                             : () {
                           setState(() {

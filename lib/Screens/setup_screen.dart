@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rd_fallbeispiel/Screens/resuscitation_screen.dart';
 
+import '../measure_requirements.dart';
 import 'normal_screen.dart';
 
 class VehicleArrival {
@@ -20,7 +21,7 @@ class QualificationSelectionScreen extends StatefulWidget {
 
 class _QualificationSelectionScreenState
     extends State<QualificationSelectionScreen> {
-  final List<String> qualifications = ['SAN', 'RH', 'RS'];
+  final List<String> qualifications = ['SAN', 'RH', 'RS', 'NFS'];
   String selectedQualification = '';
   final List<String> vehicles = ['None', 'KTW', 'RTW', 'NEF', 'RTH'];
   Map<String, int> vehicleStatus = {};
@@ -49,6 +50,21 @@ class _QualificationSelectionScreenState
     }
   }
 
+  Qualification _getQualificationEnum() {
+    switch (selectedQualification) {
+      case 'SAN':
+        return Qualification.SAN;
+      case 'RH':
+        return Qualification.RH;
+      case 'RS':
+        return Qualification.RS;
+      case 'NFS':
+        return Qualification.NFS;
+      default:
+        return Qualification.SAN;
+    }
+  }
+
   Future<void> _showArrivalTimeDialog(String vehicle) async {
     int selectedMinutes = 5;
 
@@ -69,15 +85,15 @@ class _QualificationSelectionScreenState
                     icon: const Icon(Icons.remove_circle_outline),
                     onPressed: selectedMinutes > 1
                         ? () {
-                      setDialogState(() {
-                        selectedMinutes--;
-                      });
-                    }
+                            setDialogState(() {
+                              selectedMinutes--;
+                            });
+                          }
                         : null,
                   ),
                   Container(
-                    padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 10),
                     decoration: BoxDecoration(
                       border: Border.all(color: Colors.blue, width: 2),
                       borderRadius: BorderRadius.circular(10),
@@ -94,10 +110,10 @@ class _QualificationSelectionScreenState
                     icon: const Icon(Icons.add_circle_outline),
                     onPressed: selectedMinutes < 60
                         ? () {
-                      setDialogState(() {
-                        selectedMinutes++;
-                      });
-                    }
+                            setDialogState(() {
+                              selectedMinutes++;
+                            });
+                          }
                         : null,
                   ),
                 ],
@@ -215,6 +231,7 @@ class _QualificationSelectionScreenState
             _buildSectionCard(
               icon: Icons.school,
               title: 'Qualifikationen',
+              subtitle: 'Wähle deine aktuelle Qualifikationsstufe',
               child: Wrap(
                 spacing: 10.0,
                 runSpacing: 10.0,
@@ -232,36 +249,36 @@ class _QualificationSelectionScreenState
                       decoration: BoxDecoration(
                         gradient: isSelected
                             ? LinearGradient(
-                          colors: [
-                            Colors.blue.shade400,
-                            Colors.blue.shade600
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        )
+                                colors: [
+                                  Colors.blue.shade400,
+                                  Colors.blue.shade600
+                                ],
+                              )
                             : null,
-                        color: isSelected ? null : Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(12),
+                        color: isSelected ? null : Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(
+                          color: isSelected
+                              ? Colors.blue.shade800
+                              : Colors.grey.shade400,
+                          width: 2,
+                        ),
                         boxShadow: isSelected
                             ? [
-                          BoxShadow(
-                            color: Colors.blue.withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          )
-                        ]
-                            : null,
+                                BoxShadow(
+                                  color: Colors.blue.withOpacity(0.3),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 4),
+                                )
+                              ]
+                            : [],
                       ),
                       child: Text(
                         qualification,
                         style: TextStyle(
-                          color: isSelected
-                              ? Colors.white
-                              : Colors.grey.shade700,
+                          color: isSelected ? Colors.white : Colors.black87,
+                          fontWeight: FontWeight.bold,
                           fontSize: 18,
-                          fontWeight: isSelected
-                              ? FontWeight.bold
-                              : FontWeight.w600,
                         ),
                       ),
                     ),
@@ -275,17 +292,17 @@ class _QualificationSelectionScreenState
             _buildSectionCard(
               icon: Icons.local_shipping,
               title: 'Rettungsmittel',
-              subtitle: 'Grau: Frei • Blau: Besetzt • Rot: Auf Anfahrt',
+              subtitle:
+                  'Tippe um Status zu ändern, lange drücken um Ankunftszeit anzupassen',
               child: Column(
                 children: [
                   Wrap(
-                    spacing: 10.0,
-                    runSpacing: 10.0,
-                    children: vehicles.map((vehicle) {
+                    spacing: 8.0,
+                    runSpacing: 8.0,
+                    children: vehicles
+                        .where((vehicle) => vehicle != 'None')
+                        .map((vehicle) {
                       final status = vehicleStatus[vehicle]!;
-                      final hasArrivalTime =
-                          vehicleArrivalTimes[vehicle] != null;
-
                       return GestureDetector(
                         onTap: () => updateVehicleStatus(vehicle),
                         onLongPress: status == 2
@@ -293,51 +310,74 @@ class _QualificationSelectionScreenState
                             : null,
                         child: Container(
                           width: 100,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 16),
+                          height: 100,
                           decoration: BoxDecoration(
-                            color: statusColors[status],
-                            borderRadius: BorderRadius.circular(12),
-                            border: status == 2
-                                ? Border.all(color: Colors.orange, width: 3)
+                            gradient: status > 0
+                                ? LinearGradient(
+                                    colors: status == 1
+                                        ? [
+                                            Colors.blue.shade300,
+                                            Colors.blue.shade500
+                                          ]
+                                        : [
+                                            Colors.red.shade300,
+                                            Colors.red.shade500
+                                          ],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  )
                                 : null,
-                            boxShadow: status != 0
+                            color: status == 0 ? Colors.grey.shade300 : null,
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: status > 0
+                                  ? (status == 1
+                                      ? Colors.blue.shade700
+                                      : Colors.red.shade700)
+                                  : Colors.grey.shade500,
+                              width: 2,
+                            ),
+                            boxShadow: status > 0
                                 ? [
-                              BoxShadow(
-                                color: (statusColors[status] ??
-                                    Colors.grey)
-                                    .withOpacity(0.4),
-                                blurRadius: 6,
-                                offset: const Offset(0, 3),
-                              )
-                            ]
-                                : null,
+                                    BoxShadow(
+                                      color: (status == 1
+                                              ? Colors.blue
+                                              : Colors.red)
+                                          .withOpacity(0.3),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 3),
+                                    )
+                                  ]
+                                : [],
                           ),
                           child: Column(
-                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
                                 _getVehicleIcon(vehicle),
-                                color: Colors.white,
                                 size: 32,
+                                color: status > 0
+                                    ? Colors.white
+                                    : Colors.grey.shade600,
                               ),
                               const SizedBox(height: 8),
                               Text(
                                 _getVehicleDisplayText(vehicle),
                                 textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: status > 0
+                                      ? Colors.white
+                                      : Colors.black87,
                                 ),
                               ),
-                              if (status == 2 && hasArrivalTime)
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 6),
-                                  child: Icon(
-                                    Icons.access_time,
-                                    color: Colors.white,
-                                    size: 18,
+                              if (status > 0)
+                                Text(
+                                  statusLabels[status]!,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.white.withOpacity(0.9),
                                   ),
                                 ),
                             ],
@@ -346,35 +386,32 @@ class _QualificationSelectionScreenState
                       );
                     }).toList(),
                   ),
-                  if (vehicleStatus.entries.any((e) => e.value == 2))
-                    Padding(
-                      padding: const EdgeInsets.only(top: 16.0),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.orange.shade200),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.info_outline,
-                                color: Colors.orange.shade700, size: 20),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Tipp: Langes Drücken zum Ändern der Ankunftszeit',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.orange.shade900,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.orange.shade200),
                     ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline,
+                            color: Colors.orange.shade700, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Tipp: Langes Drücken zum Ändern der Ankunftszeit',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.orange.shade900,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -419,41 +456,49 @@ class _QualificationSelectionScreenState
             Container(
               height: 60,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Colors.green, Colors.greenAccent],
+                gradient: LinearGradient(
+                  colors: selectedQualification.isEmpty
+                      ? [Colors.grey, Colors.grey.shade400]
+                      : [Colors.green, Colors.greenAccent],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(15),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.green.withOpacity(0.3),
+                    color: selectedQualification.isEmpty
+                        ? Colors.grey.withOpacity(0.3)
+                        : Colors.green.withOpacity(0.3),
                     blurRadius: 10,
                     offset: const Offset(0, 5),
                   ),
                 ],
               ),
               child: ElevatedButton(
-                onPressed: () {
-                  Map<String, DateTime?> arrivalsToPass =
-                  Map.from(vehicleArrivalTimes);
+                onPressed: selectedQualification.isEmpty
+                    ? null
+                    : () {
+                        Map<String, DateTime?> arrivalsToPass =
+                            Map.from(vehicleArrivalTimes);
 
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => isResuscitation
-                          ? ResuscitationScreen(
-                        vehicleStatus: vehicleStatus,
-                        isChildResuscitation: isChildResuscitation,
-                        vehicleArrivalTimes: arrivalsToPass,
-                      )
-                          : SchemaSelectionScreen(
-                        vehicleStatus: vehicleStatus,
-                        vehicleArrivalTimes: arrivalsToPass,
-                      ),
-                    ),
-                  );
-                },
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => isResuscitation
+                                ? ResuscitationScreen(
+                                    vehicleStatus: vehicleStatus,
+                                    isChildResuscitation: isChildResuscitation,
+                                    vehicleArrivalTimes: arrivalsToPass,
+                                    userQualification: _getQualificationEnum(),
+                                  )
+                                : SchemaSelectionScreen(
+                                    vehicleStatus: vehicleStatus,
+                                    vehicleArrivalTimes: arrivalsToPass,
+                                    userQualification: _getQualificationEnum(),
+                                  ),
+                          ),
+                        );
+                      },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.transparent,
                   shadowColor: Colors.transparent,
@@ -461,17 +506,25 @@ class _QualificationSelectionScreenState
                     borderRadius: BorderRadius.circular(15),
                   ),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.play_arrow, size: 28, color: Colors.white),
-                    SizedBox(width: 8),
+                    Icon(Icons.play_arrow,
+                        size: 28,
+                        color: selectedQualification.isEmpty
+                            ? Colors.grey.shade600
+                            : Colors.white),
+                    const SizedBox(width: 8),
                     Text(
-                      'Starten',
+                      selectedQualification.isEmpty
+                          ? 'Qualifikation wählen'
+                          : 'Starten',
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        color: selectedQualification.isEmpty
+                            ? Colors.grey.shade600
+                            : Colors.white,
                       ),
                     ),
                   ],
