@@ -28,6 +28,8 @@ IconData getSchemaIcon(String schema) {
     return Icons.history_edu;
   } else if (schema == 'OPQRST') {
     return Icons.description;
+  } else if (schema == 'Übergabe (ISBAR)') {
+    return Icons.handshake;
   } else if (schema == 'Nachforderung') {
     return Icons.phone_in_talk;
   } else if (schema == '4H') {

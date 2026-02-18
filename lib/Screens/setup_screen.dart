@@ -25,7 +25,7 @@ class _QualificationSelectionScreenState
   String selectedQualification = '';
   final List<String> vehicles = ['None', 'KTW', 'RTW', 'NEF', 'RTH'];
   Map<String, VehicleStatus> vehicleStatus = {};
-  Map<String, DateTime?> vehicleArrivalTimes = {};
+  Map<String, int?> vehicleArrivalMinutes = {};
   late bool isResuscitation = false;
   late bool isChildResuscitation = false;
 
@@ -46,7 +46,7 @@ class _QualificationSelectionScreenState
     super.initState();
     for (var vehicle in vehicles) {
       vehicleStatus[vehicle] = VehicleStatus.none;
-      vehicleArrivalTimes[vehicle] = null;
+      vehicleArrivalMinutes[vehicle] = null;
     }
   }
 
@@ -138,7 +138,7 @@ class _QualificationSelectionScreenState
               onPressed: () {
                 setState(() {
                   vehicleStatus[vehicle] = VehicleStatus.none;
-                  vehicleArrivalTimes[vehicle] = null;
+                  vehicleArrivalMinutes[vehicle] = null;
                 });
                 Navigator.of(context).pop();
               },
@@ -147,8 +147,7 @@ class _QualificationSelectionScreenState
             ElevatedButton(
               onPressed: () {
                 setState(() {
-                  vehicleArrivalTimes[vehicle] =
-                      DateTime.now().add(Duration(minutes: selectedMinutes));
+                  vehicleArrivalMinutes[vehicle] = selectedMinutes;
                 });
                 Navigator.of(context).pop();
               },
@@ -168,7 +167,7 @@ class _QualificationSelectionScreenState
 
       // Clear arrival time when status changes
       if (vehicleStatus[vehicle] != VehicleStatus.kommt) {
-        vehicleArrivalTimes[vehicle] = null;
+        vehicleArrivalMinutes[vehicle] = null;
       }
     });
 
@@ -180,18 +179,8 @@ class _QualificationSelectionScreenState
 
   String _getVehicleDisplayText(String vehicle) {
     if (vehicleStatus[vehicle] == VehicleStatus.kommt &&
-        vehicleArrivalTimes[vehicle] != null) {
-      final now = DateTime.now();
-      final arrival = vehicleArrivalTimes[vehicle]!;
-      final diff = arrival.difference(now);
-
-      if (diff.isNegative) {
-        return '$vehicle\nAngekommen!';
-      } else {
-        final minutes = diff.inMinutes;
-        final seconds = diff.inSeconds % 60;
-        return '$vehicle\n${minutes}:${seconds.toString().padLeft(2, '0')} min';
-      }
+        vehicleArrivalMinutes[vehicle] != null) {
+      return '$vehicle\nin ${vehicleArrivalMinutes[vehicle]} min';
     }
     return vehicle;
   }
@@ -480,8 +469,8 @@ class _QualificationSelectionScreenState
                 onPressed: selectedQualification.isEmpty
                     ? null
                     : () {
-                        Map<String, DateTime?> arrivalsToPass =
-                            Map.from(vehicleArrivalTimes);
+                        final Map<String, int?> arrivalsToPass =
+                            Map.from(vehicleArrivalMinutes);
 
                         Navigator.push(
                           context,
@@ -490,12 +479,12 @@ class _QualificationSelectionScreenState
                                 ? ResuscitationScreen(
                                     vehicleStatus: vehicleStatus,
                                     isChildResuscitation: isChildResuscitation,
-                                    vehicleArrivalTimes: arrivalsToPass,
+                                    vehicleArrivalMinutes: arrivalsToPass,
                                     userQualification: _getQualificationEnum(),
                                   )
                                 : SchemaSelectionScreen(
                                     vehicleStatus: vehicleStatus,
-                                    vehicleArrivalTimes: arrivalsToPass,
+                                    vehicleArrivalMinutes: arrivalsToPass,
                                     userQualification: _getQualificationEnum(),
                                   ),
                           ),

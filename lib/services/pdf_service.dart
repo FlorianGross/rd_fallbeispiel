@@ -81,7 +81,10 @@ class PdfService {
                       'Gesamt',
                       '${completedActions.length + missingActions.length}',
                       PdfColors.blue),
-                  _buildStatBox('Dauer', '$elapsedSeconds s', PdfColors.purple),
+                  _buildStatBox(
+                      'Dauer',
+                      '${(elapsedSeconds ~/ 60).toString().padLeft(2, '0')}:${(elapsedSeconds % 60).toString().padLeft(2, '0')}',
+                      PdfColors.purple),
                 ],
               ),
               pw.SizedBox(height: 20),

@@ -246,7 +246,8 @@ class MeasureRequirements {
     'c': [
       MeasureRequirement.required(schema: 'c', action: 'Pulsfrequenz'),
       MeasureRequirement.required(schema: 'c', action: 'Tastbarkeit'),
-      MeasureRequirement.required(schema: 'c', action: 'Rythmik'),
+      MeasureRequirement.required(schema: 'c', action: 'Rhythmik'),
+      MeasureRequirement.required(schema: 'c', action: 'Pulsqualität'),
       MeasureRequirement.required(schema: 'c', action: 'Recap'),
     ],
     'STU': [
@@ -580,7 +581,7 @@ class MeasureRequirements {
     'E': [
       MeasureRequirement.required(schema: 'E', action: 'Temperatur'),
       MeasureRequirement.required(schema: 'E', action: 'Body-Check'),
-      MeasureRequirement.required(schema: 'E', action: 'Exikkose'),
+      MeasureRequirement.required(schema: 'E', action: 'Exsikkose'),
       MeasureRequirement.required(schema: 'E', action: 'Ödeme'),
       MeasureRequirement.required(schema: 'E', action: 'Verletzungen'),
       MeasureRequirement(
@@ -619,7 +620,7 @@ class MeasureRequirements {
       MeasureRequirement.required(schema: 'ZOPS', action: 'Situation'),
     ],
     'SAMPLERS': [
-      MeasureRequirement.required(schema: 'SAMPLERS', action: 'Symptome'),
+      MeasureRequirement.required(schema: 'SAMPLERS', action: 'Symptome / Zeichen'),
       MeasureRequirement.required(schema: 'SAMPLERS', action: 'Allergien'),
       MeasureRequirement.required(schema: 'SAMPLERS', action: 'Medikamente'),
       MeasureRequirement.required(
@@ -682,6 +683,23 @@ class MeasureRequirements {
         minQualification: Qualification.RS,
         optionalForMinQual: true,
       ),
+    ],
+    'Übergabe (ISBAR)': [
+      MeasureRequirement.required(
+          schema: 'Übergabe (ISBAR)',
+          action: 'Identität (Name, Alter, Geschlecht)'),
+      MeasureRequirement.required(
+          schema: 'Übergabe (ISBAR)',
+          action: 'Situation (Leitsymptom / Ereignis)'),
+      MeasureRequirement.required(
+          schema: 'Übergabe (ISBAR)',
+          action: 'Beurteilung (Vitalparameter, Befunde)'),
+      MeasureRequirement.required(
+          schema: 'Übergabe (ISBAR)',
+          action: 'Aktionen (Durchgeführte Maßnahmen)'),
+      MeasureRequirement.required(
+          schema: 'Übergabe (ISBAR)',
+          action: 'Reaktion (Ansprechen auf Behandlung)'),
     ],
     'Nachforderung': [
       MeasureRequirement.optional(schema: 'Nachforderung', action: 'NEF'),

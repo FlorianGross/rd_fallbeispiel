@@ -9,13 +9,13 @@ import 'result_screen.dart';
 
 class SchemaSelectionScreen extends StatefulWidget {
   final Map<String, VehicleStatus> vehicleStatus;
-  final Map<String, DateTime?> vehicleArrivalTimes;
+  final Map<String, int?> vehicleArrivalMinutes;
   final Qualification userQualification;
 
   const SchemaSelectionScreen({
     super.key,
     required this.vehicleStatus,
-    required this.vehicleArrivalTimes,
+    required this.vehicleArrivalMinutes,
     required this.userQualification,
   });
 
@@ -37,9 +37,16 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   late Timer _timer;
   late Timer _arrivalCheckTimer;
   int _elapsedSeconds = 0;
+  late final Map<String, DateTime?> _vehicleArrivalTimes;
 
   // Track which vehicles have shown arrival notification
   Set<String> _arrivedVehicles = {};
+
+  String get _formattedTime {
+    final m = _elapsedSeconds ~/ 60;
+    final s = _elapsedSeconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
 
   // Set selectedVehicles to be finished
   void finishVehicles() {
@@ -61,6 +68,16 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   @override
   void initState() {
     super.initState();
+
+    // Ankunftszeiten werden ab Szenario-Start berechnet (nicht ab Setup)
+    final scenarioStart = DateTime.now();
+    _vehicleArrivalTimes = {
+      for (final entry in widget.vehicleArrivalMinutes.entries)
+        entry.key: entry.value != null
+            ? scenarioStart.add(Duration(minutes: entry.value!))
+            : null,
+    };
+
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
         _elapsedSeconds++;
@@ -84,7 +101,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
 
   void _checkVehicleArrivals() {
     final now = DateTime.now();
-    widget.vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
+    _vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
       if (arrivalTime != null &&
           !_arrivedVehicles.contains(vehicle) &&
           now.isAfter(arrivalTime)) {
@@ -240,12 +257,65 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     );
   }
 
+  void _showEndScenarioDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.stop_circle, color: Colors.red),
+            SizedBox(width: 12),
+            Text('Fallbeispiel beenden?'),
+          ],
+        ),
+        content: const Text(
+          'Alle Timer werden gestoppt und das Ergebnis angezeigt.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Abbrechen'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _endScenario();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text(
+              'Beenden',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _endScenario() {
+    _timer.cancel();
+    _arrivalCheckTimer.cancel();
+    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
+      completedActions,
+      widget.userQualification,
+    );
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => MeasuresOverviewScreen(
+          completedActions: completedActions,
+          missingActions: missingActions,
+          userQualification: widget.userQualification,
+        ),
+      ),
+    );
+  }
+
   Widget _buildVehicleArrivalCard() {
     // Filter vehicles that are coming and have arrival times
     final incomingVehicles = widget.vehicleStatus.entries
         .where((e) =>
             e.value == VehicleStatus.kommt &&
-            widget.vehicleArrivalTimes[e.key] != null)
+            _vehicleArrivalTimes[e.key] != null)
         .toList();
 
     if (incomingVehicles.isEmpty) {
@@ -285,7 +355,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             const SizedBox(height: 12),
             ...incomingVehicles.map((entry) {
               final vehicle = entry.key;
-              final arrivalTime = widget.vehicleArrivalTimes[vehicle]!;
+              final arrivalTime = _vehicleArrivalTimes[vehicle]!;
               final now = DateTime.now();
               final diff = arrivalTime.difference(now);
               final hasArrived = _arrivedVehicles.contains(vehicle);
@@ -379,7 +449,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-            'Schemata - Zeit: $_elapsedSeconds s (${widget.userQualification.name})'),
+            'Schemata – $_formattedTime (${widget.userQualification.name})'),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -415,6 +485,11 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             icon: const Icon(Icons.info_outline),
             tooltip: 'Hinweise & Quellen',
             onPressed: _showMedicalSourcesDialog,
+          ),
+          IconButton(
+            icon: const Icon(Icons.stop_circle, color: Colors.white),
+            tooltip: 'Fallbeispiel beenden',
+            onPressed: _showEndScenarioDialog,
           ),
         ],
       ),
@@ -534,9 +609,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                           ),
                         )
                             : null),
-                        onTap: (isCompleted || !canPerform)
-                            ? null
-                            : () {
+                        onTap: canPerform && !isCompleted
+                            ? () {
                                 setState(() {
                                   completedActions.add(CompletedAction(
                                     schema: schema,
@@ -544,7 +618,26 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                                     timestamp: DateTime.now(),
                                   ));
                                 });
-                              },
+                              }
+                            : null,
+                        onLongPress: isCompleted
+                            ? () {
+                                setState(() {
+                                  completedActions.removeWhere((e) =>
+                                      e.schema == schema &&
+                                      e.action == action);
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                        '"$action" rückgängig gemacht'),
+                                    duration:
+                                        const Duration(seconds: 2),
+                                    backgroundColor: Colors.orange,
+                                  ),
+                                );
+                              }
+                            : null,
                       ),
                     );
                   }).toList(),
