@@ -1,3 +1,46 @@
+/// Status eines Rettungsmittels
+enum VehicleStatus {
+  none, // Nicht angefordert
+  besetzt, // Besetzt/Abgemeldet
+  kommt, // Auf Anfahrt
+}
+
+/// BPM-Grenzwerte für die Reanimationsqualität
+class BpmThresholds {
+  static const int optimalMin = 100;
+  static const int optimalMax = 120;
+  static const int acceptableMin = 90;
+  static const int acceptableMax = 130;
+}
+
+/// Eine durchgeführte Maßnahme
+class CompletedAction {
+  final String schema;
+  final String action;
+  final DateTime timestamp;
+
+  const CompletedAction({
+    required this.schema,
+    required this.action,
+    required this.timestamp,
+  });
+}
+
+/// Eine fehlende verpflichtende Maßnahme
+class MissingAction {
+  final String schema;
+  final String action;
+  final RequirementLevel requirementLevel;
+  final String? note;
+
+  const MissingAction({
+    required this.schema,
+    required this.action,
+    required this.requirementLevel,
+    this.note,
+  });
+}
+
 /// Qualifikationsstufen
 enum Qualification {
   SAN, // Sanitäter
@@ -666,29 +709,29 @@ class MeasureRequirements {
   }
 
   /// Berechnet fehlende verpflichtende Maßnahmen basierend auf Qualifikation
-  static List<Map<String, dynamic>> calculateMissingRequiredActions(
-    List<Map<String, dynamic>> completedActions,
+  static List<MissingAction> calculateMissingRequiredActions(
+    List<CompletedAction> completedActions,
     Qualification userQualification,
   ) {
-    List<Map<String, dynamic>> missingRequired = [];
+    List<MissingAction> missingRequired = [];
 
     requirements.forEach((schema, measures) {
       for (var measure in measures) {
         // Prüfe ob die Maßnahme durchgeführt wurde
         bool isCompleted = completedActions.any(
           (action) =>
-              action['schema'] == measure.schema &&
-              action['action'] == measure.action,
+              action.schema == measure.schema &&
+              action.action == measure.action,
         );
 
         // Wenn nicht durchgeführt und verpflichtend für diese Qualifikation
         if (!isCompleted && measure.shouldCountAsMissing(userQualification)) {
-          missingRequired.add({
-            'schema': measure.schema,
-            'action': measure.action,
-            'requirementLevel': measure.getRequirementLevel(userQualification),
-            'note': measure.note,
-          });
+          missingRequired.add(MissingAction(
+            schema: measure.schema,
+            action: measure.action,
+            requirementLevel: measure.getRequirementLevel(userQualification),
+            note: measure.note,
+          ));
         }
       }
     });

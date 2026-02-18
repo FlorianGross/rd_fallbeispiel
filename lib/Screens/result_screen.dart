@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import '../measure_requirements.dart';
+import '../utils/schema_icons.dart';
 
 class MeasuresOverviewScreen extends StatefulWidget {
-  final List<Map<String, dynamic>> completedActions;
-  final List<Map<String, dynamic>> missingActions;
+  final List<CompletedAction> completedActions;
+  final List<MissingAction> missingActions;
   final Qualification? userQualification;
   final List<Map<String, dynamic>>? bpmHistory;
   final List<Map<String, dynamic>>? ventilationHistory;
@@ -34,45 +35,8 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
   initState() {
     super.initState();
     if (widget.completedActions.isNotEmpty) {
-      firstTimeStamp = widget.completedActions[0]['timestamp'] as DateTime;
+      firstTimeStamp = widget.completedActions.first.timestamp;
     }
-  }
-
-  IconData _getSchemaIcon(String schema) {
-    if (schema.contains('Atemwege') || schema == 'a' || schema == 'A') {
-      return Icons.air;
-    } else if (schema.contains('Atmung') || schema == 'b' || schema == 'B') {
-      return Icons.wind_power;
-    } else if (schema.contains('Kreislauf') || schema == 'c' || schema == 'C') {
-      return Icons.favorite;
-    } else if (schema == 'SSSS') {
-      return Icons.security;
-    } else if (schema == 'WASB') {
-      return Icons.psychology;
-    } else if (schema == 'STU') {
-      return Icons.personal_injury;
-    } else if (schema == 'D') {
-      return Icons.visibility;
-    } else if (schema == 'E') {
-      return Icons.thermostat;
-    } else if (schema == 'BE-FAST') {
-      return Icons.emergency;
-    } else if (schema == 'ZOPS') {
-      return Icons.quiz;
-    } else if (schema.contains('Maßnahmen')) {
-      return Icons.medical_services;
-    } else if (schema == 'SAMPLERS') {
-      return Icons.history_edu;
-    } else if (schema == 'OPQRST') {
-      return Icons.description;
-    } else if (schema == 'Nachforderung') {
-      return Icons.phone_in_talk;
-    } else if (schema == '4H') {
-      return Icons.water_drop;
-    } else if (schema == 'HITS') {
-      return Icons.coronavirus;
-    }
-    return Icons.checklist;
   }
 
   String _formatTimeDifference(int seconds) {
@@ -171,22 +135,17 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
     }
 
     // Sort by timestamp
-    final sorted = List<Map<String, dynamic>>.from(widget.completedActions);
-    sorted.sort((a, b) {
-      final timeA = a['timestamp'] as DateTime;
-      final timeB = b['timestamp'] as DateTime;
-      return timeA.compareTo(timeB);
-    });
+    final sorted = List<CompletedAction>.from(widget.completedActions)
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
     return ListView.builder(
       padding: const EdgeInsets.all(12),
       itemCount: sorted.length,
       itemBuilder: (context, index) {
         final action = sorted[index];
-        final timestamp = action['timestamp'] as DateTime;
-        final timeDiff = timestamp.difference(firstTimeStamp).inSeconds;
-        final schema = action['schema'] as String;
-        final actionName = action['action'] as String;
+        final timeDiff = action.timestamp.difference(firstTimeStamp).inSeconds;
+        final schema = action.schema;
+        final actionName = action.action;
 
         // Check if this action is optional/expected for this qualification
         final requirement = MeasureRequirements.getRequirement(schema, actionName);
@@ -263,7 +222,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             title: Row(
               children: [
                 Icon(
-                  _getSchemaIcon(schema),
+                  getSchemaIcon(schema),
                   size: 18,
                   color: Colors.grey.shade700,
                 ),
@@ -356,9 +315,9 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
     }
 
     // Group by schema
-    Map<String, List<Map<String, dynamic>>> groupedMissing = {};
+    Map<String, List<MissingAction>> groupedMissing = {};
     for (var action in widget.missingActions) {
-      final schema = action['schema'] as String;
+      final schema = action.schema;
       if (!groupedMissing.containsKey(schema)) {
         groupedMissing[schema] = [];
       }
@@ -410,7 +369,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             ),
             child: ExpansionTile(
               leading: Icon(
-                _getSchemaIcon(schema),
+                getSchemaIcon(schema),
                 color: Colors.orange.shade700,
                 size: 28,
               ),
@@ -430,9 +389,6 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 ),
               ),
               children: actions.map((action) {
-                final actionName = action['action'] as String;
-                final requiredQual = action['requiredQualification'] as Qualification?;
-
                 return Container(
                   margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
@@ -447,18 +403,9 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                       size: 20,
                     ),
                     title: Text(
-                      actionName,
+                      action.action,
                       style: const TextStyle(fontSize: 14),
                     ),
-                    subtitle: requiredQual != null
-                        ? Text(
-                      'Erfordert: ${requiredQual.name}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey.shade600,
-                      ),
-                    )
-                        : null,
                   ),
                 );
               }).toList(),
@@ -483,8 +430,8 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
 
     for (var action in widget.completedActions) {
       final requirement = MeasureRequirements.getRequirement(
-        action['schema'] as String,
-        action['action'] as String,
+        action.schema,
+        action.action,
       );
 
       if (widget.userQualification != null) {
@@ -515,18 +462,12 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
     Map<String, int> totalBySchema = {};
 
     for (var action in widget.completedActions) {
-      final schema = action['schema'] as String;
-      completedBySchema[schema] = (completedBySchema[schema] ?? 0) + 1;
-    }
-
-    for (var action in widget.completedActions) {
-      final schema = action['schema'] as String;
-      totalBySchema[schema] = (totalBySchema[schema] ?? 0) + 1;
+      completedBySchema[action.schema] = (completedBySchema[action.schema] ?? 0) + 1;
+      totalBySchema[action.schema] = (totalBySchema[action.schema] ?? 0) + 1;
     }
 
     for (var action in widget.missingActions) {
-      final schema = action['schema'] as String;
-      totalBySchema[schema] = (totalBySchema[schema] ?? 0) + 1;
+      totalBySchema[action.schema] = (totalBySchema[action.schema] ?? 0) + 1;
     }
 
     // Calculate time statistics
@@ -534,8 +475,8 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
     Duration? averageTimeBetween;
 
     if (widget.completedActions.length >= 2) {
-      final firstAction = widget.completedActions.first['timestamp'] as DateTime;
-      final lastAction = widget.completedActions.last['timestamp'] as DateTime;
+      final firstAction = widget.completedActions.first.timestamp;
+      final lastAction = widget.completedActions.last.timestamp;
       totalDuration = lastAction.difference(firstAction);
 
       final totalSeconds = totalDuration.inSeconds;
@@ -820,7 +761,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                             children: [
                               Row(
                                 children: [
-                                  Icon(_getSchemaIcon(schema), size: 16),
+                                  Icon(getSchemaIcon(schema), size: 16),
                                   const SizedBox(width: 8),
                                   Text(
                                     schema,
