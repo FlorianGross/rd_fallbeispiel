@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:rd_fallbeispiel/Screens/result_screen.dart';
 
+import '../main.dart';
 import '../measure_requirements.dart';
 import '../services/pdf_service.dart';
+import '../utils/schema_colors.dart';
+import '../utils/schema_descriptions.dart';
 import '../utils/schema_icons.dart';
 
 class ResuscitationScreen extends StatefulWidget {
@@ -179,8 +182,14 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   late Timer _timer;
   late Timer _arrivalCheckTimer;
   int _elapsedSeconds = 0;
+  bool _isPaused = false;
+  bool _allExpanded = false;
   DateTime? resuscitationStart;
   late final Map<String, DateTime?> _vehicleArrivalTimes;
+
+  // AED / Rhythmuskontrolle
+  int _lastRhythmCheckSeconds = 0;
+  bool _rhythmCheckDue = false;
 
   // Track which vehicles have shown arrival notification
   Set<String> _arrivedVehicles = {};
@@ -226,9 +235,25 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     _targetVentilationRatio = 2;
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_isPaused) return;
       setState(() {
         _elapsedSeconds++;
+        // AED-Rhythmuskontrolle: alle 2 min nach Reanimationsstart erinnern
+        if (resuscitationStart != null) {
+          final reaniSec =
+              DateTime.now().difference(resuscitationStart!).inSeconds;
+          if (reaniSec > 0 &&
+              reaniSec % 120 == 0 &&
+              reaniSec != _lastRhythmCheckSeconds) {
+            _lastRhythmCheckSeconds = reaniSec;
+            _rhythmCheckDue = true;
+          }
+        }
       });
+      if (_rhythmCheckDue) {
+        _rhythmCheckDue = false;
+        _showRhythmCheckReminder();
+      }
     });
 
     // Check for vehicle arrivals every second
@@ -504,6 +529,45 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Abbrechen'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRhythmCheckReminder() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.red.shade900,
+        title: const Row(
+          children: [
+            Icon(Icons.monitor_heart, color: Colors.white, size: 32),
+            SizedBox(width: 12),
+            Text(
+              'Rhythmuskontrolle!',
+              style: TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: const Text(
+          '2-Minuten-Zyklus abgelaufen.\n\n'
+          '→ CPR kurz stoppen\n'
+          '→ Herzrhythmus analysieren\n'
+          '→ Ggf. Defibrillation',
+          style: TextStyle(color: Colors.white, fontSize: 15),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
+            child: const Text(
+              'Verstanden – CPR fortsetzen',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -932,6 +996,33 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           ),
         ),
         actions: [
+          // Pause/Weiter
+          IconButton(
+            icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
+            tooltip: _isPaused ? 'Timer fortsetzen' : 'Timer pausieren',
+            onPressed: () => setState(() => _isPaused = !_isPaused),
+          ),
+          // Alle Expand / Collapse
+          IconButton(
+            icon: Icon(_allExpanded ? Icons.unfold_less : Icons.unfold_more),
+            tooltip: _allExpanded ? 'Alle einklappen' : 'Alle ausklappen',
+            onPressed: () => setState(() => _allExpanded = !_allExpanded),
+          ),
+          // Dark Mode
+          IconButton(
+            icon: Icon(
+              themeModeNotifier.value == ThemeMode.dark
+                  ? Icons.light_mode
+                  : Icons.dark_mode,
+            ),
+            tooltip: 'Dark Mode umschalten',
+            onPressed: () {
+              themeModeNotifier.value =
+                  themeModeNotifier.value == ThemeMode.dark
+                      ? ThemeMode.light
+                      : ThemeMode.dark;
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.list),
             tooltip: 'Übersicht',
@@ -978,13 +1069,38 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         children: [
           if (resuscitationStart != null) _buildReanimationDashboard(),
 
+          // Pause-Banner
+          if (_isPaused)
+            Container(
+              width: double.infinity,
+              color: Colors.amber.shade700,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.pause_circle, color: Colors.white, size: 18),
+                  SizedBox(width: 8),
+                  Text('Timer pausiert',
+                      style: TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+
           // Vehicle arrival status
           _buildVehicleArrivalCard(),
 
           ...schemas.keys.map((schema) {
-            bool allCompleted = schemas[schema]!.every((action) =>
-                completedActions.any(
-                    (e) => e.schema == schema && e.action == action));
+            final schemaColor = getSchemaColor(schema);
+            final schemaBg = getSchemaBackgroundColor(schema);
+            bool allCompleted = schemas[schema]!.every((action) {
+              final req = MeasureRequirements.getRequirement(schema, action);
+              if (req != null &&
+                  req.getRequirementLevel(widget.userQualification) ==
+                      RequirementLevel.notApplicable) return true;
+              return completedActions
+                  .any((e) => e.schema == schema && e.action == action);
+            });
 
             final schemaIcon = getSchemaIcon(schema);
 
@@ -994,8 +1110,10 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
-                  color: allCompleted ? Colors.green : Colors.grey.shade300,
-                  width: allCompleted ? 2 : 1,
+                  color: allCompleted
+                      ? Colors.green
+                      : schemaColor.withOpacity(0.4),
+                  width: allCompleted ? 2 : 1.5,
                 ),
               ),
               child: Theme(
@@ -1003,96 +1121,142 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   dividerColor: Colors.transparent,
                 ),
                 child: ExpansionTile(
-                  leading: Icon(
-                    schemaIcon,
-                    color: allCompleted ? Colors.green : Colors.grey.shade600,
+                  key: ValueKey('$schema-$_allExpanded'),
+                  initiallyExpanded: _allExpanded,
+                  leading: Tooltip(
+                    message: getSchemaDescription(schema),
+                    preferBelow: true,
+                    triggerMode: TooltipTriggerMode.tap,
+                    showDuration: const Duration(seconds: 6),
+                    child: Icon(
+                      schemaIcon,
+                      color: allCompleted ? Colors.green : schemaColor,
+                    ),
                   ),
                   title: Text(
                     schema,
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      color: allCompleted ? Colors.green.shade800 : Colors.black87,
+                      color: allCompleted ? Colors.green : schemaColor,
                     ),
                   ),
                   trailing: allCompleted
                       ? const Icon(Icons.check_circle, color: Colors.green)
-                      : const Icon(Icons.expand_more),
+                      : Icon(Icons.expand_more, color: schemaColor),
                   backgroundColor: allCompleted
-                      ? Colors.green.withOpacity(0.1)
-                      : Colors.transparent,
+                      ? Colors.green.withOpacity(0.08)
+                      : schemaBg,
+                  collapsedBackgroundColor: schemaBg,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  collapsedShape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   children: schemas[schema]!.map((action) {
                     bool isCompleted = completedActions.any(
                         (e) => e.schema == schema && e.action == action);
 
                     // Get requirement info
-                    final requirement = MeasureRequirements.getRequirement(schema, action);
-                    final isOptional = requirement?.isOptionalFor(widget.userQualification) ?? false;
-                    final canPerform = requirement?.canPerformWithQualification(widget.userQualification) ?? true;
-                    final requirementLevel = requirement?.getRequirementLevel(widget.userQualification);
+                    final requirement =
+                        MeasureRequirements.getRequirement(schema, action);
+                    final isOptional =
+                        requirement?.isOptionalFor(widget.userQualification) ??
+                            false;
+                    final canPerform = requirement
+                            ?.canPerformWithQualification(
+                                widget.userQualification) ??
+                        true;
+                    final requirementLevel =
+                        requirement?.getRequirementLevel(widget.userQualification);
 
                     return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(8),
                         color: isCompleted
-                            ? Colors.green.shade100
-                            : (isOptional ? Colors.blue.shade50 : Colors.grey.shade100),
-                        border: isOptional && !isCompleted
-                            ? Border.all(color: Colors.blue.shade300, width: 1.5)
-                            : null,
+                            ? Colors.green.withOpacity(0.12)
+                            : (isOptional
+                                ? Colors.blue.withOpacity(0.06)
+                                : null),
+                        border: isCompleted
+                            ? Border.all(
+                                color: Colors.green.withOpacity(0.4), width: 1)
+                            : (isOptional && !isCompleted
+                                ? Border.all(
+                                    color: Colors.blue.shade300, width: 1.5)
+                                : null),
                       ),
                       child: ListTile(
+                        dense: true,
                         leading: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
-                              color: isCompleted ? Colors.green : (isOptional ? Colors.blue : Colors.grey),
+                              isCompleted
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              color: isCompleted
+                                  ? Colors.green
+                                  : (isOptional ? Colors.blue : Colors.grey),
                             ),
                             if (isOptional && !isCompleted) ...[
                               const SizedBox(width: 4),
-                              Icon(Icons.help_outline, color: Colors.blue.shade600, size: 16),
+                              Icon(Icons.help_outline,
+                                  color: Colors.blue.shade600, size: 14),
                             ],
                             if (!canPerform) ...[
                               const SizedBox(width: 4),
-                              Icon(Icons.lock, color: Colors.orange.shade700, size: 16),
+                              Icon(Icons.lock,
+                                  color: Colors.orange.shade700, size: 14),
+                            ],
+                            if (isCompleted) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.undo,
+                                  color: Colors.green.withOpacity(0.5),
+                                  size: 12),
                             ],
                           ],
                         ),
                         title: Text(
                           action,
                           style: TextStyle(
+                            fontSize: 13,
                             color: isCompleted
-                                ? Colors.green.shade900
-                                : (!canPerform ? Colors.grey.shade600 : Colors.black87),
-                            fontWeight: isCompleted ? FontWeight.w500 : FontWeight.normal,
-                            decoration: !canPerform ? TextDecoration.lineThrough : null,
+                                ? Colors.green.shade800
+                                : (!canPerform ? Colors.grey.shade500 : null),
+                            fontWeight: isCompleted
+                                ? FontWeight.w500
+                                : FontWeight.normal,
+                            decoration: !canPerform
+                                ? TextDecoration.lineThrough
+                                : null,
                           ),
                         ),
                         subtitle: !canPerform
                             ? Text(
-                          'Nicht verfügbar für ${widget.userQualification.name}',
-                          style: TextStyle(
-                            color: Colors.orange.shade700,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        )
+                                'Nicht verfügbar für ${widget.userQualification.name}',
+                                style: TextStyle(
+                                    color: Colors.orange.shade700,
+                                    fontSize: 11),
+                              )
                             : (isOptional
-                            ? Text(
-                          requirementLevel == RequirementLevel.expected ? 'Erwartet' : 'Optional',
-                          style: TextStyle(
-                            color: requirementLevel == RequirementLevel.expected
-                                ? Colors.amber.shade700
-                                : Colors.blue.shade700,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        )
-                            : null),
-                        onTap: (isCompleted || !canPerform)
-                            ? null
-                            : () {
+                                ? Text(
+                                    requirementLevel ==
+                                            RequirementLevel.expected
+                                        ? 'Erwartet'
+                                        : 'Optional',
+                                    style: TextStyle(
+                                      color: requirementLevel ==
+                                              RequirementLevel.expected
+                                          ? Colors.amber.shade700
+                                          : Colors.blue.shade700,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  )
+                                : null),
+                        onTap: canPerform && !isCompleted
+                            ? () {
                                 setState(() {
                                   completedActions.add(CompletedAction(
                                     schema: schema,
@@ -1100,7 +1264,25 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                                     timestamp: DateTime.now(),
                                   ));
                                 });
-                              },
+                              }
+                            : null,
+                        onLongPress: isCompleted
+                            ? () {
+                                setState(() {
+                                  completedActions.removeWhere((e) =>
+                                      e.schema == schema &&
+                                      e.action == action);
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                        '"$action" rückgängig gemacht'),
+                                    duration: const Duration(seconds: 2),
+                                    backgroundColor: Colors.orange,
+                                  ),
+                                );
+                              }
+                            : null,
                       ),
                     );
                   }).toList(),

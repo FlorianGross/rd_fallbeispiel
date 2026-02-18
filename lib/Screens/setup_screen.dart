@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rd_fallbeispiel/Screens/resuscitation_screen.dart';
 
+import '../main.dart';
 import '../measure_requirements.dart';
 import 'normal_screen.dart';
 
@@ -214,6 +215,23 @@ class _QualificationSelectionScreenState
             ),
           ),
         ),
+        actions: [
+          ValueListenableBuilder<ThemeMode>(
+            valueListenable: themeModeNotifier,
+            builder: (_, mode, __) => IconButton(
+              icon: Icon(
+                mode == ThemeMode.dark ? Icons.light_mode : Icons.dark_mode,
+                color: Colors.white,
+              ),
+              tooltip: 'Dark Mode umschalten',
+              onPressed: () {
+                themeModeNotifier.value = mode == ThemeMode.dark
+                    ? ThemeMode.light
+                    : ThemeMode.dark;
+              },
+            ),
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
