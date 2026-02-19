@@ -1,3 +1,46 @@
+/// Status eines Rettungsmittels
+enum VehicleStatus {
+  none, // Nicht angefordert
+  besetzt, // Besetzt/Abgemeldet
+  kommt, // Auf Anfahrt
+}
+
+/// BPM-Grenzwerte für die Reanimationsqualität
+class BpmThresholds {
+  static const int optimalMin = 100;
+  static const int optimalMax = 120;
+  static const int acceptableMin = 90;
+  static const int acceptableMax = 130;
+}
+
+/// Eine durchgeführte Maßnahme
+class CompletedAction {
+  final String schema;
+  final String action;
+  final DateTime timestamp;
+
+  const CompletedAction({
+    required this.schema,
+    required this.action,
+    required this.timestamp,
+  });
+}
+
+/// Eine fehlende verpflichtende Maßnahme
+class MissingAction {
+  final String schema;
+  final String action;
+  final RequirementLevel requirementLevel;
+  final String? note;
+
+  const MissingAction({
+    required this.schema,
+    required this.action,
+    required this.requirementLevel,
+    this.note,
+  });
+}
+
 /// Qualifikationsstufen
 enum Qualification {
   SAN, // Sanitäter
@@ -143,6 +186,8 @@ class MeasureRequirements {
       MeasureRequirement.required(schema: 'SSSS', action: 'Support'),
     ],
     'Erster Eindruck': [
+      MeasureRequirement.required(
+          schema: 'Erster Eindruck', action: 'Lebensbedrohliche Situation?'),
       MeasureRequirement.required(schema: 'Erster Eindruck', action: 'Zyanose'),
       MeasureRequirement.required(
           schema: 'Erster Eindruck', action: 'Austreten Flüssigkeiten'),
@@ -203,7 +248,8 @@ class MeasureRequirements {
     'c': [
       MeasureRequirement.required(schema: 'c', action: 'Pulsfrequenz'),
       MeasureRequirement.required(schema: 'c', action: 'Tastbarkeit'),
-      MeasureRequirement.required(schema: 'c', action: 'Rythmik'),
+      MeasureRequirement.required(schema: 'c', action: 'Rhythmik'),
+      MeasureRequirement.required(schema: 'c', action: 'Pulsqualität'),
       MeasureRequirement.required(schema: 'c', action: 'Recap'),
     ],
     'STU': [
@@ -500,6 +546,8 @@ class MeasureRequirements {
       MeasureRequirement.required(schema: 'C', action: 'Blutdruck'),
       MeasureRequirement.required(schema: 'C', action: 'Puls'),
       MeasureRequirement.required(schema: 'C', action: 'Recap'),
+      MeasureRequirement.optional(
+          schema: 'C', action: 'Schock-Index (Puls ÷ syst. RR)'),
       MeasureRequirement(
         schema: 'C',
         action: 'EKG',
@@ -522,22 +570,15 @@ class MeasureRequirements {
           Qualification.NFS: RequirementLevel.required,
         },
       ),
-      MeasureRequirement(
-        schema: 'D',
-        action: 'GCS',
-        requirementByQualification: {
-          Qualification.SAN: RequirementLevel.optional,
-          Qualification.RH: RequirementLevel.required,
-          Qualification.RS: RequirementLevel.required,
-          Qualification.NFS: RequirementLevel.required,
-        },
-      ),
+      MeasureRequirement.required(schema: 'D', action: 'GCS – Augen (E1–E4)'),
+      MeasureRequirement.required(schema: 'D', action: 'GCS – Motorik (M1–M6)'),
+      MeasureRequirement.required(schema: 'D', action: 'GCS – Verbal (V1–V5)'),
       MeasureRequirement.required(schema: 'D', action: 'BZ'),
     ],
     'E': [
       MeasureRequirement.required(schema: 'E', action: 'Temperatur'),
       MeasureRequirement.required(schema: 'E', action: 'Body-Check'),
-      MeasureRequirement.required(schema: 'E', action: 'Exikkose'),
+      MeasureRequirement.required(schema: 'E', action: 'Exsikkose'),
       MeasureRequirement.required(schema: 'E', action: 'Ödeme'),
       MeasureRequirement.required(schema: 'E', action: 'Verletzungen'),
       MeasureRequirement(
@@ -576,33 +617,66 @@ class MeasureRequirements {
       MeasureRequirement.required(schema: 'ZOPS', action: 'Situation'),
     ],
     'SAMPLERS': [
-      MeasureRequirement.required(schema: 'SAMPLERS', action: 'Symptome'),
+      MeasureRequirement.required(schema: 'SAMPLERS', action: 'Symptome / Zeichen'),
       MeasureRequirement.required(schema: 'SAMPLERS', action: 'Allergien'),
       MeasureRequirement.required(schema: 'SAMPLERS', action: 'Medikamente'),
       MeasureRequirement.required(
           schema: 'SAMPLERS', action: 'Patientenvorgeschichte'),
       MeasureRequirement.required(
           schema: 'SAMPLERS',
-          action: 'Letzte Mahlzeit / Flüssigkeits Aufnahme,...'),
+          action: 'Letzte Mahlzeit / Flüssigkeitsaufnahme'),
       MeasureRequirement.required(schema: 'SAMPLERS', action: 'Ereignis'),
       MeasureRequirement.required(schema: 'SAMPLERS', action: 'Risikofaktoren'),
       MeasureRequirement.required(
           schema: 'SAMPLERS', action: 'Schwangerschaft'),
     ],
+    '4H': [
+      MeasureRequirement.optional(schema: '4H', action: 'Hypoxie'),
+      MeasureRequirement.optional(schema: '4H', action: 'Hypovolämie'),
+      MeasureRequirement.optional(
+          schema: '4H', action: 'Hypo-/Hyperkaliämie (Elektrolytstörung)'),
+      MeasureRequirement.optional(
+          schema: '4H', action: 'Hypothermie / Hyperthermie'),
+    ],
+    'HITS': [
+      MeasureRequirement.optional(schema: 'HITS', action: 'Herzbeuteltamponade'),
+      MeasureRequirement.optional(schema: 'HITS', action: 'Intoxikation'),
+      MeasureRequirement.optional(
+          schema: 'HITS', action: 'Thrombose (Lungenembolie / Herzinfarkt)'),
+      MeasureRequirement.optional(
+          schema: 'HITS', action: 'Spannungspneumothorax'),
+    ],
     'OPQRST': [
-      MeasureRequirement.required(schema: 'OPQRST', action: 'Onset'),
-      MeasureRequirement.required(schema: 'OPQRST', action: 'Provocation'),
-      MeasureRequirement.required(schema: 'OPQRST', action: 'Quality'),
-      MeasureRequirement.required(schema: 'OPQRST', action: 'Radiation'),
-      MeasureRequirement.required(schema: 'OPQRST', action: 'Severity'),
-      MeasureRequirement.required(schema: 'OPQRST', action: 'Time'),
+      MeasureRequirement.required(schema: 'OPQRST', action: 'Onset (Beginn / Zeitpunkt)'),
+      MeasureRequirement.required(schema: 'OPQRST', action: 'Provocation (Auslöser / Linderung)'),
+      MeasureRequirement.required(schema: 'OPQRST', action: 'Quality (Charakter der Beschwerden)'),
+      MeasureRequirement.required(schema: 'OPQRST', action: 'Radiation (Ausstrahlung)'),
+      MeasureRequirement.required(schema: 'OPQRST', action: 'Severity (Intensität 0–10)'),
+      MeasureRequirement.required(schema: 'OPQRST', action: 'Time (Zeitverlauf / Dauer)'),
     ],
     'Maßnahmen': [
-      MeasureRequirement.optional(
-          schema: 'Maßnahmen', action: 'Sauerstoffgabe'),
+      MeasureRequirement(
+        schema: 'Maßnahmen',
+        action: 'Sauerstoffgabe',
+        requirementByQualification: {
+          Qualification.SAN: RequirementLevel.optional,
+          Qualification.RH: RequirementLevel.expected,
+          Qualification.RS: RequirementLevel.expected,
+          Qualification.NFS: RequirementLevel.expected,
+        },
+      ),
       MeasureRequirement.optional(
           schema: 'Maßnahmen', action: 'Beatmung (kontrolliert/assistiert)'),
-      MeasureRequirement.optional(schema: 'Maßnahmen', action: 'Wärmeerhalt'),
+      MeasureRequirement(
+        schema: 'Maßnahmen',
+        action: 'Wärmeerhalt',
+        requirementByQualification: {
+          Qualification.SAN: RequirementLevel.optional,
+          Qualification.RH: RequirementLevel.expected,
+          Qualification.RS: RequirementLevel.expected,
+          Qualification.NFS: RequirementLevel.expected,
+        },
+      ),
       MeasureRequirement.optional(
         schema: 'Maßnahmen',
         action: 'Intubation',
@@ -639,6 +713,35 @@ class MeasureRequirements {
         minQualification: Qualification.RS,
         optionalForMinQual: true,
       ),
+      MeasureRequirement.fromQualification(
+        schema: 'Maßnahmen (erweitert)',
+        action: 'Thoraxdekompression',
+        minQualification: Qualification.NFS,
+        optionalForMinQual: false,
+      ),
+      MeasureRequirement.fromQualification(
+        schema: 'Maßnahmen (erweitert)',
+        action: 'Beckenschlinge',
+        minQualification: Qualification.RS,
+        optionalForMinQual: true,
+      ),
+    ],
+    'Übergabe (ISBAR)': [
+      MeasureRequirement.required(
+          schema: 'Übergabe (ISBAR)',
+          action: 'Identität (Name, Alter, Geschlecht)'),
+      MeasureRequirement.required(
+          schema: 'Übergabe (ISBAR)',
+          action: 'Situation (Leitsymptom / Ereignis)'),
+      MeasureRequirement.required(
+          schema: 'Übergabe (ISBAR)',
+          action: 'Beurteilung (Vitalparameter, Befunde)'),
+      MeasureRequirement.required(
+          schema: 'Übergabe (ISBAR)',
+          action: 'Aktionen (Durchgeführte Maßnahmen)'),
+      MeasureRequirement.required(
+          schema: 'Übergabe (ISBAR)',
+          action: 'Reaktion / Rückmeldung (Ansprechen auf Behandlung)'),
     ],
     'Nachforderung': [
       MeasureRequirement.optional(schema: 'Nachforderung', action: 'NEF'),
@@ -666,29 +769,29 @@ class MeasureRequirements {
   }
 
   /// Berechnet fehlende verpflichtende Maßnahmen basierend auf Qualifikation
-  static List<Map<String, dynamic>> calculateMissingRequiredActions(
-    List<Map<String, dynamic>> completedActions,
+  static List<MissingAction> calculateMissingRequiredActions(
+    List<CompletedAction> completedActions,
     Qualification userQualification,
   ) {
-    List<Map<String, dynamic>> missingRequired = [];
+    List<MissingAction> missingRequired = [];
 
     requirements.forEach((schema, measures) {
       for (var measure in measures) {
         // Prüfe ob die Maßnahme durchgeführt wurde
         bool isCompleted = completedActions.any(
           (action) =>
-              action['schema'] == measure.schema &&
-              action['action'] == measure.action,
+              action.schema == measure.schema &&
+              action.action == measure.action,
         );
 
         // Wenn nicht durchgeführt und verpflichtend für diese Qualifikation
         if (!isCompleted && measure.shouldCountAsMissing(userQualification)) {
-          missingRequired.add({
-            'schema': measure.schema,
-            'action': measure.action,
-            'requirementLevel': measure.getRequirementLevel(userQualification),
-            'note': measure.note,
-          });
+          missingRequired.add(MissingAction(
+            schema: measure.schema,
+            action: measure.action,
+            requirementLevel: measure.getRequirementLevel(userQualification),
+            note: measure.note,
+          ));
         }
       }
     });

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:rd_fallbeispiel/Screens/resuscitation_screen.dart';
 
+import '../main.dart';
 import '../measure_requirements.dart';
 import 'normal_screen.dart';
 
@@ -24,29 +25,29 @@ class _QualificationSelectionScreenState
   final List<String> qualifications = ['SAN', 'RH', 'RS', 'NFS'];
   String selectedQualification = '';
   final List<String> vehicles = ['None', 'KTW', 'RTW', 'NEF', 'RTH'];
-  Map<String, int> vehicleStatus = {};
-  Map<String, DateTime?> vehicleArrivalTimes = {};
+  Map<String, VehicleStatus> vehicleStatus = {};
+  Map<String, int?> vehicleArrivalMinutes = {};
   late bool isResuscitation = false;
   late bool isChildResuscitation = false;
 
-  final Map<int, Color> statusColors = {
-    0: Colors.grey,
-    1: Colors.blue,
-    2: Colors.red,
+  final Map<VehicleStatus, Color> statusColors = {
+    VehicleStatus.none: Colors.grey,
+    VehicleStatus.besetzt: Colors.blue,
+    VehicleStatus.kommt: Colors.red,
   };
 
-  final Map<int, String> statusLabels = {
-    0: '',
-    1: 'besetzt',
-    2: 'kommt',
+  final Map<VehicleStatus, String> statusLabels = {
+    VehicleStatus.none: '',
+    VehicleStatus.besetzt: 'besetzt',
+    VehicleStatus.kommt: 'kommt',
   };
 
   @override
   void initState() {
     super.initState();
     for (var vehicle in vehicles) {
-      vehicleStatus[vehicle] = 0;
-      vehicleArrivalTimes[vehicle] = null;
+      vehicleStatus[vehicle] = VehicleStatus.none;
+      vehicleArrivalMinutes[vehicle] = null;
     }
   }
 
@@ -137,8 +138,8 @@ class _QualificationSelectionScreenState
             TextButton(
               onPressed: () {
                 setState(() {
-                  vehicleStatus[vehicle] = 0;
-                  vehicleArrivalTimes[vehicle] = null;
+                  vehicleStatus[vehicle] = VehicleStatus.none;
+                  vehicleArrivalMinutes[vehicle] = null;
                 });
                 Navigator.of(context).pop();
               },
@@ -147,8 +148,7 @@ class _QualificationSelectionScreenState
             ElevatedButton(
               onPressed: () {
                 setState(() {
-                  vehicleArrivalTimes[vehicle] =
-                      DateTime.now().add(Duration(minutes: selectedMinutes));
+                  vehicleArrivalMinutes[vehicle] = selectedMinutes;
                 });
                 Navigator.of(context).pop();
               },
@@ -162,33 +162,26 @@ class _QualificationSelectionScreenState
 
   void updateVehicleStatus(String vehicle) async {
     setState(() {
-      vehicleStatus[vehicle] = (vehicleStatus[vehicle]! + 1) % 3;
+      final current = vehicleStatus[vehicle]!;
+      vehicleStatus[vehicle] =
+          VehicleStatus.values[(current.index + 1) % VehicleStatus.values.length];
 
       // Clear arrival time when status changes
-      if (vehicleStatus[vehicle] != 2) {
-        vehicleArrivalTimes[vehicle] = null;
+      if (vehicleStatus[vehicle] != VehicleStatus.kommt) {
+        vehicleArrivalMinutes[vehicle] = null;
       }
     });
 
-    // Show dialog when setting to "kommt" (status 2)
-    if (vehicleStatus[vehicle] == 2) {
+    // Show dialog when setting to "kommt"
+    if (vehicleStatus[vehicle] == VehicleStatus.kommt) {
       await _showArrivalTimeDialog(vehicle);
     }
   }
 
   String _getVehicleDisplayText(String vehicle) {
-    if (vehicleStatus[vehicle] == 2 && vehicleArrivalTimes[vehicle] != null) {
-      final now = DateTime.now();
-      final arrival = vehicleArrivalTimes[vehicle]!;
-      final diff = arrival.difference(now);
-
-      if (diff.isNegative) {
-        return '$vehicle\nAngekommen!';
-      } else {
-        final minutes = diff.inMinutes;
-        final seconds = diff.inSeconds % 60;
-        return '$vehicle\n${minutes}:${seconds.toString().padLeft(2, '0')} min';
-      }
+    if (vehicleStatus[vehicle] == VehicleStatus.kommt &&
+        vehicleArrivalMinutes[vehicle] != null) {
+      return '$vehicle\nin ${vehicleArrivalMinutes[vehicle]} min';
     }
     return vehicle;
   }
@@ -222,6 +215,23 @@ class _QualificationSelectionScreenState
             ),
           ),
         ),
+        actions: [
+          ValueListenableBuilder<ThemeMode>(
+            valueListenable: themeModeNotifier,
+            builder: (_, mode, __) => IconButton(
+              icon: Icon(
+                mode == ThemeMode.dark ? Icons.light_mode : Icons.dark_mode,
+                color: Colors.white,
+              ),
+              tooltip: 'Dark Mode umschalten',
+              onPressed: () {
+                themeModeNotifier.value = mode == ThemeMode.dark
+                    ? ThemeMode.light
+                    : ThemeMode.dark;
+              },
+            ),
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -303,18 +313,19 @@ class _QualificationSelectionScreenState
                         .where((vehicle) => vehicle != 'None')
                         .map((vehicle) {
                       final status = vehicleStatus[vehicle]!;
+                      final isActive = status != VehicleStatus.none;
                       return GestureDetector(
                         onTap: () => updateVehicleStatus(vehicle),
-                        onLongPress: status == 2
+                        onLongPress: status == VehicleStatus.kommt
                             ? () => _showArrivalTimeDialog(vehicle)
                             : null,
                         child: Container(
                           width: 100,
                           height: 100,
                           decoration: BoxDecoration(
-                            gradient: status > 0
+                            gradient: isActive
                                 ? LinearGradient(
-                                    colors: status == 1
+                                    colors: status == VehicleStatus.besetzt
                                         ? [
                                             Colors.blue.shade300,
                                             Colors.blue.shade500
@@ -327,20 +338,20 @@ class _QualificationSelectionScreenState
                                     end: Alignment.bottomRight,
                                   )
                                 : null,
-                            color: status == 0 ? Colors.grey.shade300 : null,
+                            color: !isActive ? Colors.grey.shade300 : null,
                             borderRadius: BorderRadius.circular(15),
                             border: Border.all(
-                              color: status > 0
-                                  ? (status == 1
+                              color: isActive
+                                  ? (status == VehicleStatus.besetzt
                                       ? Colors.blue.shade700
                                       : Colors.red.shade700)
                                   : Colors.grey.shade500,
                               width: 2,
                             ),
-                            boxShadow: status > 0
+                            boxShadow: isActive
                                 ? [
                                     BoxShadow(
-                                      color: (status == 1
+                                      color: (status == VehicleStatus.besetzt
                                               ? Colors.blue
                                               : Colors.red)
                                           .withOpacity(0.3),
@@ -356,7 +367,7 @@ class _QualificationSelectionScreenState
                               Icon(
                                 _getVehicleIcon(vehicle),
                                 size: 32,
-                                color: status > 0
+                                color: isActive
                                     ? Colors.white
                                     : Colors.grey.shade600,
                               ),
@@ -367,12 +378,10 @@ class _QualificationSelectionScreenState
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
-                                  color: status > 0
-                                      ? Colors.white
-                                      : Colors.black87,
+                                  color: isActive ? Colors.white : Colors.black87,
                                 ),
                               ),
-                              if (status > 0)
+                              if (isActive)
                                 Text(
                                   statusLabels[status]!,
                                   style: TextStyle(
@@ -478,8 +487,8 @@ class _QualificationSelectionScreenState
                 onPressed: selectedQualification.isEmpty
                     ? null
                     : () {
-                        Map<String, DateTime?> arrivalsToPass =
-                            Map.from(vehicleArrivalTimes);
+                        final Map<String, int?> arrivalsToPass =
+                            Map.from(vehicleArrivalMinutes);
 
                         Navigator.push(
                           context,
@@ -488,12 +497,12 @@ class _QualificationSelectionScreenState
                                 ? ResuscitationScreen(
                                     vehicleStatus: vehicleStatus,
                                     isChildResuscitation: isChildResuscitation,
-                                    vehicleArrivalTimes: arrivalsToPass,
+                                    vehicleArrivalMinutes: arrivalsToPass,
                                     userQualification: _getQualificationEnum(),
                                   )
                                 : SchemaSelectionScreen(
                                     vehicleStatus: vehicleStatus,
-                                    vehicleArrivalTimes: arrivalsToPass,
+                                    vehicleArrivalMinutes: arrivalsToPass,
                                     userQualification: _getQualificationEnum(),
                                   ),
                           ),

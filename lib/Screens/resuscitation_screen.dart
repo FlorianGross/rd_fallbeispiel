@@ -2,24 +2,26 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 import 'package:rd_fallbeispiel/Screens/result_screen.dart';
 
+import '../main.dart';
 import '../measure_requirements.dart';
+import '../services/pdf_service.dart';
+import '../utils/schema_colors.dart';
+import '../utils/schema_descriptions.dart';
+import '../utils/schema_icons.dart';
 
 class ResuscitationScreen extends StatefulWidget {
-  final Map<String, int> vehicleStatus;
+  final Map<String, VehicleStatus> vehicleStatus;
   final bool isChildResuscitation;
-  final Map<String, DateTime?> vehicleArrivalTimes;
+  final Map<String, int?> vehicleArrivalMinutes;
   final Qualification userQualification;
 
   const ResuscitationScreen({
     super.key,
     required this.vehicleStatus,
     required this.isChildResuscitation,
-    required this.vehicleArrivalTimes,
+    required this.vehicleArrivalMinutes,
     required this.userQualification,
   });
 
@@ -166,33 +168,50 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
   Color _getBPMColor() {
     if (_bpm == 0) return Colors.grey;
-    if (_bpm >= 100 && _bpm <= 120) return Colors.green;
-    if (_bpm >= 90 && _bpm <= 130) return Colors.orange;
+    if (_bpm >= BpmThresholds.optimalMin && _bpm <= BpmThresholds.optimalMax) {
+      return Colors.green;
+    }
+    if (_bpm >= BpmThresholds.acceptableMin && _bpm <= BpmThresholds.acceptableMax) {
+      return Colors.orange;
+    }
     return Colors.red;
   }
 
   // Other
-  List<Map<String, dynamic>> completedActions = [];
+  List<CompletedAction> completedActions = [];
   late Timer _timer;
   late Timer _arrivalCheckTimer;
   int _elapsedSeconds = 0;
+  bool _isPaused = false;
+  bool _allExpanded = false;
   DateTime? resuscitationStart;
+  late final Map<String, DateTime?> _vehicleArrivalTimes;
+
+  // AED / Rhythmuskontrolle
+  int _lastRhythmCheckSeconds = 0;
+  bool _rhythmCheckDue = false;
 
   // Track which vehicles have shown arrival notification
   Set<String> _arrivedVehicles = {};
+
+  String get _formattedTime {
+    final m = _elapsedSeconds ~/ 60;
+    final s = _elapsedSeconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
 
   // Set selectedVehicles to be finished
   void finishVehicles() {
     setState(() {
       widget.vehicleStatus.forEach((key, value) {
-        if (value == 2 &&
+        if (value == VehicleStatus.kommt &&
             !completedActions.any(
-                    (e) => e['schema'] == 'Nachforderung' && e['action'] == key)) {
-          completedActions.add({
-            'schema': 'Nachforderung',
-            'action': key,
-            'timestamp': DateTime.now()
-          });
+                (e) => e.schema == 'Nachforderung' && e.action == key)) {
+          completedActions.add(CompletedAction(
+            schema: 'Nachforderung',
+            action: key,
+            timestamp: DateTime.now(),
+          ));
         }
       });
     });
@@ -202,14 +221,39 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   void initState() {
     super.initState();
 
+    // Ankunftszeiten werden ab Szenario-Start berechnet (nicht ab Setup)
+    final scenarioStart = DateTime.now();
+    _vehicleArrivalTimes = {
+      for (final entry in widget.vehicleArrivalMinutes.entries)
+        entry.key: entry.value != null
+            ? scenarioStart.add(Duration(minutes: entry.value!))
+            : null,
+    };
+
     // Set ratio based on child/adult resuscitation
     _targetCompressionRatio = widget.isChildResuscitation ? 15 : 30;
     _targetVentilationRatio = 2;
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_isPaused) return;
       setState(() {
         _elapsedSeconds++;
+        // AED-Rhythmuskontrolle: alle 2 min nach Reanimationsstart erinnern
+        if (resuscitationStart != null) {
+          final reaniSec =
+              DateTime.now().difference(resuscitationStart!).inSeconds;
+          if (reaniSec > 0 &&
+              reaniSec % 120 == 0 &&
+              reaniSec != _lastRhythmCheckSeconds) {
+            _lastRhythmCheckSeconds = reaniSec;
+            _rhythmCheckDue = true;
+          }
+        }
       });
+      if (_rhythmCheckDue) {
+        _rhythmCheckDue = false;
+        _showRhythmCheckReminder();
+      }
     });
 
     // Check for vehicle arrivals every second
@@ -241,7 +285,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
   void _checkVehicleArrivals() {
     final now = DateTime.now();
-    widget.vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
+    _vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
       if (arrivalTime != null &&
           !_arrivedVehicles.contains(vehicle) &&
           now.isAfter(arrivalTime)) {
@@ -316,747 +360,25 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     super.dispose();
   }
 
-  void generatePDF() async {
-    final pdf = pw.Document();
+  Future<void> generatePDF() async {
     final missingActions = MeasureRequirements.calculateMissingRequiredActions(
       completedActions,
       widget.userQualification,
     );
-
-    if (completedActions.isNotEmpty) {
-      DateTime firstActionTime = completedActions.first['timestamp'];
-      final now = DateTime.now();
-
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(40),
-          build: (pw.Context context) {
-            return [
-              // Header with gradient-like effect
-              pw.Container(
-                padding: const pw.EdgeInsets.all(20),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.blue900,
-                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(10)),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      'PATIENTENVERSORGUNGSBERICHT',
-                      style: pw.TextStyle(
-                        fontSize: 28,
-                        fontWeight: pw.FontWeight.bold,
-                        color: PdfColors.white,
-                      ),
-                    ),
-                    pw.SizedBox(height: 8),
-                    pw.Text(
-                      'Reanimation - ${widget.isChildResuscitation ? "Kind/Säugling" : "Erwachsener"}',
-                      style: pw.TextStyle(
-                        fontSize: 14,
-                        color: PdfColors.grey300,
-                      ),
-                    ),
-                    pw.SizedBox(height: 4),
-                    pw.Text(
-                      'Qualifikation: ${widget.userQualification.name}',
-                      style: pw.TextStyle(
-                        fontSize: 14,
-                        color: PdfColors.white,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                    pw.SizedBox(height: 4),
-                    pw.Text(
-                      'Erstellt: ${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year} um ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')} Uhr',
-                      style: pw.TextStyle(
-                        fontSize: 11,
-                        color: PdfColors.grey300,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 25),
-
-              // Reanimation Statistics Section
-              pw.Container(
-                padding: const pw.EdgeInsets.all(15),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.red50,
-                  border: pw.Border.all(color: PdfColors.red200, width: 2),
-                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Row(
-                      children: [
-                        pw.Container(
-                          width: 4,
-                          height: 20,
-                          color: PdfColors.red,
-                        ),
-                        pw.SizedBox(width: 10),
-                        pw.Text(
-                          'REANIMATIONSSTATISTIK',
-                          style: pw.TextStyle(
-                            fontSize: 16,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.red900,
-                          ),
-                        ),
-                      ],
-                    ),
-                    pw.SizedBox(height: 12),
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildStatBox('Kompressionen', '$_compressionCount', PdfColors.red),
-                        _buildStatBox('Beatmungen', '$_ventilationCount', PdfColors.blue),
-                        _buildStatBox('Verhältnis', '$_targetCompressionRatio:$_targetVentilationRatio', PdfColors.green),
-                      ],
-                    ),
-                    if (resuscitationStart != null) ...[
-                      pw.SizedBox(height: 10),
-                      pw.Divider(color: PdfColors.red200),
-                      pw.SizedBox(height: 10),
-                      pw.Text(
-                        'Reanimationsdauer: ${DateTime.now().difference(resuscitationStart!).inMinutes} Minuten',
-                        style: const pw.TextStyle(fontSize: 11),
-                      ),
-                      if (_bpm > 0)
-                        pw.Text(
-                          'Durchschnittliche Frequenz: ${_bpm.toStringAsFixed(0)} BPM',
-                          style: const pw.TextStyle(fontSize: 11),
-                        ),
-                    ],
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 20),
-
-              // Reanimation Graph
-              _buildReanimationGraph(),
-              if (_bpmHistory.isNotEmpty) pw.SizedBox(height: 20),
-
-              // Vehicle Status Section
-              pw.Container(
-                padding: const pw.EdgeInsets.all(15),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.blue50,
-                  border: pw.Border.all(color: PdfColors.blue200, width: 2),
-                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Row(
-                      children: [
-                        pw.Container(
-                          width: 4,
-                          height: 20,
-                          color: PdfColors.blue,
-                        ),
-                        pw.SizedBox(width: 10),
-                        pw.Text(
-                          'RETTUNGSMITTEL',
-                          style: pw.TextStyle(
-                            fontSize: 16,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.blue900,
-                          ),
-                        ),
-                      ],
-                    ),
-                    pw.SizedBox(height: 10),
-                    ...widget.vehicleStatus.entries
-                        .where((entry) => entry.value != 0)
-                        .map((entry) => pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(vertical: 3),
-                      child: pw.Row(
-                        children: [
-                          pw.Container(
-                            width: 8,
-                            height: 8,
-                            decoration: pw.BoxDecoration(
-                              color: entry.value == 2 ? PdfColors.red : PdfColors.blue,
-                              shape: pw.BoxShape.circle,
-                            ),
-                          ),
-                          pw.SizedBox(width: 8),
-                          pw.Text(
-                            "${entry.key}: ${entry.value == 2 ? 'Auf Anfahrt' : 'Besetzt'}",
-                            style: const pw.TextStyle(fontSize: 11),
-                          ),
-                        ],
-                      ),
-                    )),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 20),
-
-              // Timeline Section
-              pw.Container(
-                padding: const pw.EdgeInsets.all(15),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.green50,
-                  border: pw.Border.all(color: PdfColors.green200, width: 2),
-                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Row(
-                      children: [
-                        pw.Container(
-                          width: 4,
-                          height: 20,
-                          color: PdfColors.green,
-                        ),
-                        pw.SizedBox(width: 10),
-                        pw.Text(
-                          'MASSNAHMEN-PROTOKOLL (${completedActions.length} durchgeführt)',
-                          style: pw.TextStyle(
-                            fontSize: 16,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.green900,
-                          ),
-                        ),
-                      ],
-                    ),
-                    pw.SizedBox(height: 12),
-                    ...completedActions.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final action = entry.value;
-                      Duration diff = action['timestamp'].difference(firstActionTime);
-                      String elapsedTime = "+${diff.inMinutes}:${(diff.inSeconds % 60).toString().padLeft(2, '0')} min";
-                      firstActionTime = action['timestamp'];
-
-                      return pw.Container(
-                        margin: const pw.EdgeInsets.only(bottom: 6),
-                        padding: const pw.EdgeInsets.all(8),
-                        decoration: pw.BoxDecoration(
-                          color: index % 2 == 0 ? PdfColors.white : PdfColors.green100,
-                          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
-                        ),
-                        child: pw.Row(
-                          children: [
-                            pw.Container(
-                              width: 24,
-                              height: 24,
-                              decoration: pw.BoxDecoration(
-                                color: PdfColors.green,
-                                shape: pw.BoxShape.circle,
-                              ),
-                              child: pw.Center(
-                                child: pw.Text(
-                                  '${index + 1}',
-                                  style: pw.TextStyle(
-                                    color: PdfColors.white,
-                                    fontSize: 10,
-                                    fontWeight: pw.FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            pw.SizedBox(width: 10),
-                            pw.Expanded(
-                              flex: 2,
-                              child: pw.Text(
-                                action['schema'],
-                                style: pw.TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            pw.Expanded(
-                              flex: 5,
-                              child: pw.Text(
-                                action['action'],
-                                style: const pw.TextStyle(fontSize: 10),
-                              ),
-                            ),
-                            pw.Container(
-                              padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: pw.BoxDecoration(
-                                color: PdfColors.grey300,
-                                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
-                              ),
-                              child: pw.Text(
-                                elapsedTime,
-                                style: pw.TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-                  ],
-                ),
-              ),
-
-              // Missing Actions Section (only if there are any)
-              if (missingActions.isNotEmpty) ...[
-                pw.SizedBox(height: 20),
-                pw.Container(
-                  padding: const pw.EdgeInsets.all(15),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.orange50,
-                    border: pw.Border.all(color: PdfColors.orange200, width: 2),
-                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-                  ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Row(
-                        children: [
-                          pw.Container(
-                            width: 4,
-                            height: 20,
-                            color: PdfColors.orange,
-                          ),
-                          pw.SizedBox(width: 10),
-                          pw.Text(
-                            'FEHLENDE MASSNAHMEN (${missingActions.length})',
-                            style: pw.TextStyle(
-                              fontSize: 16,
-                              fontWeight: pw.FontWeight.bold,
-                              color: PdfColors.orange900,
-                            ),
-                          ),
-                        ],
-                      ),
-                      pw.SizedBox(height: 10),
-                      ...missingActions.map((action) => pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                        child: pw.Row(
-                          children: [
-                            pw.Container(
-                              width: 6,
-                              height: 6,
-                              decoration: const pw.BoxDecoration(
-                                color: PdfColors.orange,
-                                shape: pw.BoxShape.circle,
-                              ),
-                            ),
-                            pw.SizedBox(width: 8),
-                            pw.Text(
-                              "${action['schema']} - ${action['action']}",
-                              style: const pw.TextStyle(fontSize: 10),
-                            ),
-                          ],
-                        ),
-                      )),
-                    ],
-                  ),
-                ),
-              ],
-
-              // Footer
-              pw.SizedBox(height: 30),
-              pw.Divider(color: PdfColors.grey400),
-              pw.SizedBox(height: 10),
-              pw.Text(
-                'Dieser Bericht dient ausschließlich Ausbildungs- und Trainingszwecken im Rettungsdienst.',
-                style: pw.TextStyle(
-                  fontSize: 9,
-                  color: PdfColors.grey600,
-                  fontStyle: pw.FontStyle.italic,
-                ),
-                textAlign: pw.TextAlign.center,
-              ),
-            ];
-          },
-        ),
-      );
-    }
-    await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save());
-  }
-
-  pw.Widget _buildStatBox(String label, String value, PdfColor color) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(10),
-      decoration: pw.BoxDecoration(
-        color: PdfColors.white,
-        border: pw.Border.all(color: color, width: 2),
-        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
-      ),
-      child: pw.Column(
-        children: [
-          pw.Text(
-            value,
-            style: pw.TextStyle(
-              fontSize: 18,
-              fontWeight: pw.FontWeight.bold,
-              color: color,
-            ),
-          ),
-          pw.SizedBox(height: 4),
-          pw.Text(
-            label,
-            style: pw.TextStyle(
-              fontSize: 9,
-              color: PdfColors.grey700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  pw.Widget _buildReanimationGraph() {
-    if (_bpmHistory.isEmpty || resuscitationStart == null) {
-      return pw.SizedBox.shrink();
-    }
-
-    final graphWidth = 480.0;
-    final graphHeight = 180.0;
-
-    // Calculate time range
-    final startTime = resuscitationStart!;
-    final endTime = _bpmHistory.last['timestamp'] as DateTime;
-    final totalSeconds = endTime.difference(startTime).inSeconds.toDouble();
-
-    if (totalSeconds <= 0) return pw.SizedBox.shrink();
-
-    // Calculate average BPM
-    final avgBPM = _bpmHistory.map((e) => e['bpm'] as double).reduce((a, b) => a + b) / _bpmHistory.length;
-
-    // Count BPM in ranges
-    int optimalCount = 0;
-    int acceptableCount = 0;
-    int poorCount = 0;
-
-    for (var data in _bpmHistory) {
-      final bpm = data['bpm'] as double;
-      if (bpm >= 100 && bpm <= 120) {
-        optimalCount++;
-      } else if (bpm >= 90 && bpm <= 130) {
-        acceptableCount++;
-      } else {
-        poorCount++;
-      }
-    }
-
-    final total = _bpmHistory.length;
-    final optimalPercent = (optimalCount / total * 100);
-    final acceptablePercent = (acceptableCount / total * 100);
-    final poorPercent = (poorCount / total * 100);
-
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(15),
-      decoration: pw.BoxDecoration(
-        color: PdfColors.grey100,
-        border: pw.Border.all(color: PdfColors.grey400, width: 2),
-        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-      ),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Row(
-            children: [
-              pw.Container(
-                width: 4,
-                height: 20,
-                color: PdfColors.purple,
-              ),
-              pw.SizedBox(width: 10),
-              pw.Text(
-                'REANIMATIONSQUALITÄT',
-                style: pw.TextStyle(
-                  fontSize: 16,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.purple900,
-                ),
-              ),
-            ],
-          ),
-          pw.SizedBox(height: 15),
-
-          // Statistics Row
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-            children: [
-              _buildQualityStatBox(
-                'Durchschnitt',
-                '${avgBPM.toStringAsFixed(0)} BPM',
-                avgBPM >= 100 && avgBPM <= 120 ? PdfColors.green :
-                avgBPM >= 90 && avgBPM <= 130 ? PdfColors.orange : PdfColors.red,
-              ),
-              _buildQualityStatBox(
-                'Messungen',
-                '$total',
-                PdfColors.blue,
-              ),
-              _buildQualityStatBox(
-                'Beatmungen',
-                '${_ventilationHistory.length}',
-                PdfColors.blue,
-              ),
-            ],
-          ),
-
-          pw.SizedBox(height: 15),
-
-          // Quality Bar Chart
-          pw.Container(
-            padding: const pw.EdgeInsets.all(10),
-            decoration: pw.BoxDecoration(
-              color: PdfColors.white,
-              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
-            ),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text(
-                  'Qualitätsverteilung:',
-                  style: pw.TextStyle(
-                    fontSize: 12,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 8),
-
-                // Optimal bar
-                _buildQualityBar(
-                  'Optimal (100-120 BPM)',
-                  optimalCount,
-                  optimalPercent,
-                  PdfColors.green,
-                  graphWidth - 20,
-                ),
-                pw.SizedBox(height: 6),
-
-                // Acceptable bar
-                _buildQualityBar(
-                  'Akzeptabel (90-130 BPM)',
-                  acceptableCount,
-                  acceptablePercent,
-                  PdfColors.orange,
-                  graphWidth - 20,
-                ),
-                pw.SizedBox(height: 6),
-
-                // Poor bar
-                _buildQualityBar(
-                  'Verbesserungsbedarf',
-                  poorCount,
-                  poorPercent,
-                  PdfColors.red,
-                  graphWidth - 20,
-                ),
-              ],
-            ),
-          ),
-
-          pw.SizedBox(height: 15),
-
-          // Timeline visualization
-          pw.Container(
-            padding: const pw.EdgeInsets.all(10),
-            decoration: pw.BoxDecoration(
-              color: PdfColors.white,
-              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
-            ),
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text(
-                  'Zeitlicher Verlauf (${totalSeconds.toInt()}s Gesamtdauer):',
-                  style: pw.TextStyle(
-                    fontSize: 12,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 8),
-
-                // Visual timeline
-                pw.Container(
-                  height: 40,
-                  child: pw.Stack(
-                    children: [
-                      // Background bar
-                      pw.Container(
-                        height: 20,
-                        decoration: pw.BoxDecoration(
-                          color: PdfColors.grey300,
-                          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
-                        ),
-                      ),
-
-                      // BPM quality segments
-                      pw.Row(
-                        children: _bpmHistory.asMap().entries.map((entry) {
-                          final data = entry.value;
-                          final bpm = data['bpm'] as double;
-
-                          PdfColor color;
-                          if (bpm >= 100 && bpm <= 120) {
-                            color = PdfColors.green;
-                          } else if (bpm >= 90 && bpm <= 130) {
-                            color = PdfColors.orange;
-                          } else {
-                            color = PdfColors.red;
-                          }
-
-                          return pw.Expanded(
-                            child: pw.Container(
-                              height: 20,
-                              decoration: pw.BoxDecoration(
-                                color: color,
-                                border: pw.Border.all(color: PdfColors.white, width: 0.5),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-
-                      // Ventilation markers
-                      ..._ventilationHistory.map((ventilation) {
-                        final ventTime = (ventilation['timestamp'] as DateTime).difference(startTime).inSeconds;
-                        final position = (ventTime / totalSeconds) * (graphWidth - 20);
-
-                        return pw.Positioned(
-                          left: position,
-                          top: 0,
-                          child: pw.Container(
-                            width: 3,
-                            height: 40,
-                            color: PdfColors.blue,
-                          ),
-                        );
-                      }).toList(),
-                    ],
-                  ),
-                ),
-
-                pw.SizedBox(height: 8),
-
-                // Timeline labels
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text('Start', style: const pw.TextStyle(fontSize: 9)),
-                    pw.Text('${(totalSeconds / 2).toInt()}s', style: const pw.TextStyle(fontSize: 9)),
-                    pw.Text('Ende (${totalSeconds.toInt()}s)', style: const pw.TextStyle(fontSize: 9)),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          pw.SizedBox(height: 10),
-
-          // Legend
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.center,
-            children: [
-              _buildLegendItem(PdfColors.green, 'Optimal'),
-              pw.SizedBox(width: 10),
-              _buildLegendItem(PdfColors.orange, 'Akzeptabel'),
-              pw.SizedBox(width: 10),
-              _buildLegendItem(PdfColors.red, 'Verbesserungsbedarf'),
-              pw.SizedBox(width: 10),
-              _buildLegendItem(PdfColors.blue, 'Beatmung'),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  pw.Widget _buildQualityStatBox(String label, String value, PdfColor color) {
-    return pw.Container(
-      width: 140,
-      padding: const pw.EdgeInsets.all(10),
-      decoration: pw.BoxDecoration(
-        color: PdfColors.white,
-        border: pw.Border.all(color: color, width: 2),
-        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
-      ),
-      child: pw.Column(
-        children: [
-          pw.Text(
-            value,
-            style: pw.TextStyle(
-              fontSize: 18,
-              fontWeight: pw.FontWeight.bold,
-              color: color,
-            ),
-          ),
-          pw.SizedBox(height: 4),
-          pw.Text(
-            label,
-            style: pw.TextStyle(
-              fontSize: 9,
-              color: PdfColors.grey700,
-            ),
-            textAlign: pw.TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-
-  pw.Widget _buildQualityBar(String label, int count, double percent, PdfColor color, double maxWidth) {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          children: [
-            pw.Text(label, style: const pw.TextStyle(fontSize: 10)),
-            pw.Text('$count (${percent.toStringAsFixed(1)}%)',
-                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-          ],
-        ),
-        pw.SizedBox(height: 3),
-        pw.Container(
-          height: 20,
-          decoration: pw.BoxDecoration(
-            color: PdfColors.grey200,
-            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
-          ),
-          child: pw.Row(
-            children: [
-              pw.Container(
-                width: maxWidth * (percent / 100),
-                decoration: pw.BoxDecoration(
-                  color: color,
-                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  pw.Widget _buildLegendItem(PdfColor color, String label) {
-    return pw.Row(
-      mainAxisSize: pw.MainAxisSize.min,
-      children: [
-        pw.Container(
-          width: 15,
-          height: 3,
-          color: color,
-        ),
-        pw.SizedBox(width: 4),
-        pw.Text(
-          label,
-          style: const pw.TextStyle(fontSize: 8),
-        ),
-      ],
+    await PdfService.generateResuscitationPdf(
+      completedActions: completedActions,
+      missingActions: missingActions,
+      userQualification: widget.userQualification,
+      isChildResuscitation: widget.isChildResuscitation,
+      compressionCount: _compressionCount,
+      ventilationCount: _ventilationCount,
+      targetCompressionRatio: _targetCompressionRatio,
+      targetVentilationRatio: _targetVentilationRatio,
+      resuscitationStart: resuscitationStart,
+      bpm: _bpm,
+      bpmHistory: _bpmHistory,
+      ventilationHistory: _ventilationHistory,
+      vehicleStatus: widget.vehicleStatus,
     );
   }
 
@@ -1209,6 +531,103 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             child: const Text('Abbrechen'),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showRhythmCheckReminder() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.red.shade900,
+        title: const Row(
+          children: [
+            Icon(Icons.monitor_heart, color: Colors.white, size: 32),
+            SizedBox(width: 12),
+            Text(
+              'Rhythmuskontrolle!',
+              style: TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: const Text(
+          '2-Minuten-Zyklus abgelaufen.\n\n'
+          '→ CPR kurz stoppen\n'
+          '→ Herzrhythmus analysieren\n'
+          '→ Ggf. Defibrillation',
+          style: TextStyle(color: Colors.white, fontSize: 15),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
+            child: const Text(
+              'Verstanden – CPR fortsetzen',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEndScenarioDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.stop_circle, color: Colors.red),
+            SizedBox(width: 12),
+            Text('Fallbeispiel beenden?'),
+          ],
+        ),
+        content: const Text(
+          'Alle Timer werden gestoppt und das Ergebnis angezeigt.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Abbrechen'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _endScenario();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text(
+              'Beenden',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _endScenario() {
+    _timer.cancel();
+    _arrivalCheckTimer.cancel();
+    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
+      completedActions,
+      widget.userQualification,
+    );
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => MeasuresOverviewScreen(
+          completedActions: completedActions,
+          missingActions: missingActions,
+          userQualification: widget.userQualification,
+          bpmHistory: _bpmHistory,
+          ventilationHistory: _ventilationHistory,
+          compressionCount: _compressionCount,
+          ventilationCount: _ventilationCount,
+          resuscitationStart: resuscitationStart,
+        ),
       ),
     );
   }
@@ -1435,9 +854,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   }
 
   Widget _buildVehicleArrivalCard() {
-    // Filter vehicles that are coming (status 2) and have arrival times
+    // Filter vehicles that are coming and have arrival times
     final incomingVehicles = widget.vehicleStatus.entries
-        .where((e) => e.value == 2 && widget.vehicleArrivalTimes[e.key] != null)
+        .where((e) =>
+            e.value == VehicleStatus.kommt &&
+            _vehicleArrivalTimes[e.key] != null)
         .toList();
 
     if (incomingVehicles.isEmpty) {
@@ -1477,7 +898,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             const SizedBox(height: 12),
             ...incomingVehicles.map((entry) {
               final vehicle = entry.key;
-              final arrivalTime = widget.vehicleArrivalTimes[vehicle]!;
+              final arrivalTime = _vehicleArrivalTimes[vehicle]!;
               final now = DateTime.now();
               final diff = arrivalTime.difference(now);
               final hasArrived = _arrivedVehicles.contains(vehicle);
@@ -1564,7 +985,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Reanimation - Zeit: $_elapsedSeconds s (${widget.userQualification.name})'),
+        title: Text('Reanimation – $_formattedTime (${widget.userQualification.name})'),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -1575,6 +996,33 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           ),
         ),
         actions: [
+          // Pause/Weiter
+          IconButton(
+            icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
+            tooltip: _isPaused ? 'Timer fortsetzen' : 'Timer pausieren',
+            onPressed: () => setState(() => _isPaused = !_isPaused),
+          ),
+          // Alle Expand / Collapse
+          IconButton(
+            icon: Icon(_allExpanded ? Icons.unfold_less : Icons.unfold_more),
+            tooltip: _allExpanded ? 'Alle einklappen' : 'Alle ausklappen',
+            onPressed: () => setState(() => _allExpanded = !_allExpanded),
+          ),
+          // Dark Mode
+          IconButton(
+            icon: Icon(
+              themeModeNotifier.value == ThemeMode.dark
+                  ? Icons.light_mode
+                  : Icons.dark_mode,
+            ),
+            tooltip: 'Dark Mode umschalten',
+            onPressed: () {
+              themeModeNotifier.value =
+                  themeModeNotifier.value == ThemeMode.dark
+                      ? ThemeMode.light
+                      : ThemeMode.dark;
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.list),
             tooltip: 'Übersicht',
@@ -1610,37 +1058,51 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             tooltip: 'Hinweise & Quellen',
             onPressed: _showMedicalSourcesDialog,
           ),
+          IconButton(
+            icon: const Icon(Icons.stop_circle, color: Colors.white),
+            tooltip: 'Fallbeispiel beenden',
+            onPressed: _showEndScenarioDialog,
+          ),
         ],
       ),
       body: ListView(
         children: [
           if (resuscitationStart != null) _buildReanimationDashboard(),
 
+          // Pause-Banner
+          if (_isPaused)
+            Container(
+              width: double.infinity,
+              color: Colors.amber.shade700,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.pause_circle, color: Colors.white, size: 18),
+                  SizedBox(width: 8),
+                  Text('Timer pausiert',
+                      style: TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+
           // Vehicle arrival status
           _buildVehicleArrivalCard(),
 
           ...schemas.keys.map((schema) {
-            bool allCompleted = schemas[schema]!.every((action) =>
-                completedActions.any(
-                        (e) => e['schema'] == schema && e['action'] == action));
+            final schemaColor = getSchemaColor(schema);
+            final schemaBg = getSchemaBackgroundColor(schema);
+            bool allCompleted = schemas[schema]!.every((action) {
+              final req = MeasureRequirements.getRequirement(schema, action);
+              if (req != null &&
+                  req.getRequirementLevel(widget.userQualification) ==
+                      RequirementLevel.notApplicable) return true;
+              return completedActions
+                  .any((e) => e.schema == schema && e.action == action);
+            });
 
-            // Get icon for schema
-            IconData schemaIcon = Icons.checklist;
-            if (schema.contains('Atemwege') || schema == 'a') {
-              schemaIcon = Icons.air;
-            } else if (schema.contains('Atmung') || schema == 'b' || schema == 'B') {
-              schemaIcon = Icons.wind_power;
-            } else if (schema.contains('Kreislauf') || schema == 'c' || schema == 'C') {
-              schemaIcon = Icons.favorite;
-            } else if (schema == 'SSSS') {
-              schemaIcon = Icons.security;
-            } else if (schema == 'WASB') {
-              schemaIcon = Icons.psychology;
-            } else if (schema.contains('Maßnahmen')) {
-              schemaIcon = Icons.medical_services;
-            } else if (schema == 'SAMPLERS') {
-              schemaIcon = Icons.history_edu;
-            }
+            final schemaIcon = getSchemaIcon(schema);
 
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1648,8 +1110,10 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
-                  color: allCompleted ? Colors.green : Colors.grey.shade300,
-                  width: allCompleted ? 2 : 1,
+                  color: allCompleted
+                      ? Colors.green
+                      : schemaColor.withOpacity(0.4),
+                  width: allCompleted ? 2 : 1.5,
                 ),
               ),
               child: Theme(
@@ -1657,104 +1121,168 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   dividerColor: Colors.transparent,
                 ),
                 child: ExpansionTile(
-                  leading: Icon(
-                    schemaIcon,
-                    color: allCompleted ? Colors.green : Colors.grey.shade600,
+                  key: ValueKey('$schema-$_allExpanded'),
+                  initiallyExpanded: _allExpanded,
+                  leading: Tooltip(
+                    message: getSchemaDescription(schema),
+                    preferBelow: true,
+                    triggerMode: TooltipTriggerMode.tap,
+                    showDuration: const Duration(seconds: 6),
+                    child: Icon(
+                      schemaIcon,
+                      color: allCompleted ? Colors.green : schemaColor,
+                    ),
                   ),
                   title: Text(
                     schema,
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      color: allCompleted ? Colors.green.shade800 : Colors.black87,
+                      color: allCompleted ? Colors.green : schemaColor,
                     ),
                   ),
                   trailing: allCompleted
                       ? const Icon(Icons.check_circle, color: Colors.green)
-                      : const Icon(Icons.expand_more),
+                      : Icon(Icons.expand_more, color: schemaColor),
                   backgroundColor: allCompleted
-                      ? Colors.green.withOpacity(0.1)
-                      : Colors.transparent,
+                      ? Colors.green.withOpacity(0.08)
+                      : schemaBg,
+                  collapsedBackgroundColor: schemaBg,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  collapsedShape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   children: schemas[schema]!.map((action) {
                     bool isCompleted = completedActions.any(
-                            (e) => e['schema'] == schema && e['action'] == action);
+                        (e) => e.schema == schema && e.action == action);
 
                     // Get requirement info
-                    final requirement = MeasureRequirements.getRequirement(schema, action);
-                    final isOptional = requirement?.isOptionalFor(widget.userQualification) ?? false;
-                    final canPerform = requirement?.canPerformWithQualification(widget.userQualification) ?? true;
-                    final requirementLevel = requirement?.getRequirementLevel(widget.userQualification);
+                    final requirement =
+                        MeasureRequirements.getRequirement(schema, action);
+                    final isOptional =
+                        requirement?.isOptionalFor(widget.userQualification) ??
+                            false;
+                    final canPerform = requirement
+                            ?.canPerformWithQualification(
+                                widget.userQualification) ??
+                        true;
+                    final requirementLevel =
+                        requirement?.getRequirementLevel(widget.userQualification);
 
                     return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(8),
                         color: isCompleted
-                            ? Colors.green.shade100
-                            : (isOptional ? Colors.blue.shade50 : Colors.grey.shade100),
-                        border: isOptional && !isCompleted
-                            ? Border.all(color: Colors.blue.shade300, width: 1.5)
-                            : null,
+                            ? Colors.green.withOpacity(0.12)
+                            : (isOptional
+                                ? Colors.blue.withOpacity(0.06)
+                                : null),
+                        border: isCompleted
+                            ? Border.all(
+                                color: Colors.green.withOpacity(0.4), width: 1)
+                            : (isOptional && !isCompleted
+                                ? Border.all(
+                                    color: Colors.blue.shade300, width: 1.5)
+                                : null),
                       ),
                       child: ListTile(
+                        dense: true,
                         leading: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
-                              color: isCompleted ? Colors.green : (isOptional ? Colors.blue : Colors.grey),
+                              isCompleted
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              color: isCompleted
+                                  ? Colors.green
+                                  : (isOptional ? Colors.blue : Colors.grey),
                             ),
                             if (isOptional && !isCompleted) ...[
                               const SizedBox(width: 4),
-                              Icon(Icons.help_outline, color: Colors.blue.shade600, size: 16),
+                              Icon(Icons.help_outline,
+                                  color: Colors.blue.shade600, size: 14),
                             ],
                             if (!canPerform) ...[
                               const SizedBox(width: 4),
-                              Icon(Icons.lock, color: Colors.orange.shade700, size: 16),
+                              Icon(Icons.lock,
+                                  color: Colors.orange.shade700, size: 14),
+                            ],
+                            if (isCompleted) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.undo,
+                                  color: Colors.green.withOpacity(0.5),
+                                  size: 12),
                             ],
                           ],
                         ),
                         title: Text(
                           action,
                           style: TextStyle(
+                            fontSize: 13,
                             color: isCompleted
-                                ? Colors.green.shade900
-                                : (!canPerform ? Colors.grey.shade600 : Colors.black87),
-                            fontWeight: isCompleted ? FontWeight.w500 : FontWeight.normal,
-                            decoration: !canPerform ? TextDecoration.lineThrough : null,
+                                ? Colors.green.shade800
+                                : (!canPerform ? Colors.grey.shade500 : null),
+                            fontWeight: isCompleted
+                                ? FontWeight.w500
+                                : FontWeight.normal,
+                            decoration: !canPerform
+                                ? TextDecoration.lineThrough
+                                : null,
                           ),
                         ),
                         subtitle: !canPerform
                             ? Text(
-                          'Nicht verfügbar für ${widget.userQualification.name}',
-                          style: TextStyle(
-                            color: Colors.orange.shade700,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        )
+                                'Nicht verfügbar für ${widget.userQualification.name}',
+                                style: TextStyle(
+                                    color: Colors.orange.shade700,
+                                    fontSize: 11),
+                              )
                             : (isOptional
-                            ? Text(
-                          requirementLevel == RequirementLevel.expected ? 'Erwartet' : 'Optional',
-                          style: TextStyle(
-                            color: requirementLevel == RequirementLevel.expected
-                                ? Colors.amber.shade700
-                                : Colors.blue.shade700,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        )
-                            : null),
-                        onTap: (isCompleted || !canPerform)
-                            ? null
-                            : () {
-                          setState(() {
-                            completedActions.add({
-                              'schema': schema,
-                              'action': action,
-                              'timestamp': DateTime.now()
-                            });
-                          });
-                        },
+                                ? Text(
+                                    requirementLevel ==
+                                            RequirementLevel.expected
+                                        ? 'Erwartet'
+                                        : 'Optional',
+                                    style: TextStyle(
+                                      color: requirementLevel ==
+                                              RequirementLevel.expected
+                                          ? Colors.amber.shade700
+                                          : Colors.blue.shade700,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  )
+                                : null),
+                        onTap: canPerform && !isCompleted
+                            ? () {
+                                setState(() {
+                                  completedActions.add(CompletedAction(
+                                    schema: schema,
+                                    action: action,
+                                    timestamp: DateTime.now(),
+                                  ));
+                                });
+                              }
+                            : null,
+                        onLongPress: isCompleted
+                            ? () {
+                                setState(() {
+                                  completedActions.removeWhere((e) =>
+                                      e.schema == schema &&
+                                      e.action == action);
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                        '"$action" rückgängig gemacht'),
+                                    duration: const Duration(seconds: 2),
+                                    backgroundColor: Colors.orange,
+                                  ),
+                                );
+                              }
+                            : null,
                       ),
                     );
                   }).toList(),

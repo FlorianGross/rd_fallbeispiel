@@ -1,22 +1,24 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 
+import '../main.dart';
 import '../measure_requirements.dart';
+import '../services/pdf_service.dart';
+import '../utils/schema_colors.dart';
+import '../utils/schema_descriptions.dart';
+import '../utils/schema_icons.dart';
 import 'result_screen.dart';
 
 class SchemaSelectionScreen extends StatefulWidget {
-  final Map<String, int> vehicleStatus;
-  final Map<String, DateTime?> vehicleArrivalTimes;
+  final Map<String, VehicleStatus> vehicleStatus;
+  final Map<String, int?> vehicleArrivalMinutes;
   final Qualification userQualification;
 
   const SchemaSelectionScreen({
     super.key,
     required this.vehicleStatus,
-    required this.vehicleArrivalTimes,
+    required this.vehicleArrivalMinutes,
     required this.userQualification,
   });
 
@@ -34,26 +36,58 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     return result;
   }
 
-  List<Map<String, dynamic>> completedActions = [];
+  List<CompletedAction> completedActions = [];
   late Timer _timer;
   late Timer _arrivalCheckTimer;
   int _elapsedSeconds = 0;
+  bool _isPaused = false;
+  late DateTime _scenarioStart;
+  late final Map<String, DateTime?> _vehicleArrivalTimes;
+  bool _allExpanded = false;
 
   // Track which vehicles have shown arrival notification
   Set<String> _arrivedVehicles = {};
+
+  String get _formattedTime {
+    final m = _elapsedSeconds ~/ 60;
+    final s = _elapsedSeconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  /// Anzahl vollständig abgehakter Schemata (nur verpflichtende + erwartete)
+  int get _completedSchemaCount {
+    return schemas.keys.where((schema) {
+      return schemas[schema]!.every((action) {
+        final req = MeasureRequirements.getRequirement(schema, action);
+        if (req != null &&
+            req.getRequirementLevel(widget.userQualification) ==
+                RequirementLevel.notApplicable) return true;
+        return completedActions
+            .any((e) => e.schema == schema && e.action == action);
+      });
+    }).length;
+  }
+
+  /// Formatierter Zeitstempel relativ zu Szenario-Start
+  String _relativeTime(DateTime ts) {
+    final diff = ts.difference(_scenarioStart);
+    final m = diff.inMinutes;
+    final s = diff.inSeconds % 60;
+    return '+${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
 
   // Set selectedVehicles to be finished
   void finishVehicles() {
     setState(() {
       widget.vehicleStatus.forEach((key, value) {
-        if (value == 2 &&
+        if (value == VehicleStatus.kommt &&
             !completedActions.any(
-                    (e) => e['schema'] == 'Nachforderung' && e['action'] == key)) {
-          completedActions.add({
-            'schema': 'Nachforderung',
-            'action': key,
-            'timestamp': DateTime.now()
-          });
+                (e) => e.schema == 'Nachforderung' && e.action == key)) {
+          completedActions.add(CompletedAction(
+            schema: 'Nachforderung',
+            action: key,
+            timestamp: DateTime.now(),
+          ));
         }
       });
     });
@@ -62,10 +96,22 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   @override
   void initState() {
     super.initState();
+
+    // Ankunftszeiten werden ab Szenario-Start berechnet (nicht ab Setup)
+    _scenarioStart = DateTime.now();
+    _vehicleArrivalTimes = {
+      for (final entry in widget.vehicleArrivalMinutes.entries)
+        entry.key: entry.value != null
+            ? _scenarioStart.add(Duration(minutes: entry.value!))
+            : null,
+    };
+
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() {
-        _elapsedSeconds++;
-      });
+      if (!_isPaused) {
+        setState(() {
+          _elapsedSeconds++;
+        });
+      }
     });
 
     // Check for vehicle arrivals every second
@@ -85,7 +131,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
 
   void _checkVehicleArrivals() {
     final now = DateTime.now();
-    widget.vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
+    _vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
       if (arrivalTime != null &&
           !_arrivedVehicles.contains(vehicle) &&
           now.isAfter(arrivalTime)) {
@@ -161,308 +207,15 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   }
 
   Future<void> generatePDF() async {
-    final pdf = pw.Document();
-
-    // Calculate missing actions based on user qualification
     final missingActions = MeasureRequirements.calculateMissingRequiredActions(
       completedActions,
       widget.userQualification,
     );
-
-    // Sort completed actions by timestamp
-    final sortedCompleted = List<Map<String, dynamic>>.from(completedActions);
-    sortedCompleted.sort((a, b) {
-      final timeA = a['timestamp'] as DateTime;
-      final timeB = b['timestamp'] as DateTime;
-      return timeA.compareTo(timeB);
-    });
-
-    final now = DateTime.now();
-    final firstTimeStamp = sortedCompleted.isNotEmpty
-        ? sortedCompleted[0]['timestamp'] as DateTime
-        : now;
-
-    if (sortedCompleted.isNotEmpty) {
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(40),
-          build: (pw.Context context) {
-            return [
-              // Header
-              pw.Container(
-                padding: const pw.EdgeInsets.all(20),
-                decoration: pw.BoxDecoration(
-                  gradient: const pw.LinearGradient(
-                    colors: [PdfColors.red300, PdfColors.blue300],
-                  ),
-                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(10)),
-                ),
-                child: pw.Column(
-                  children: [
-                    pw.Text(
-                      'TRAININGSBERICHT PATIENTENVERSORGUNG',
-                      style: pw.TextStyle(
-                        fontSize: 20,
-                        fontWeight: pw.FontWeight.bold,
-                        color: PdfColors.white,
-                      ),
-                    ),
-                    pw.SizedBox(height: 8),
-                    pw.Text(
-                      'Qualifikation: ${widget.userQualification.name}',
-                      style: const pw.TextStyle(
-                        fontSize: 14,
-                        color: PdfColors.white,
-                      ),
-                    ),
-                    pw.SizedBox(height: 4),
-                    pw.Text(
-                      'Erstellt am: ${now.day}.${now.month}.${now.year} um ${now.hour}:${now.minute.toString().padLeft(2, '0')} Uhr',
-                      style: const pw.TextStyle(
-                        fontSize: 12,
-                        color: PdfColors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 20),
-
-              // Statistics Row
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildStatBox(
-                    'Durchgeführt',
-                    '${completedActions.length}',
-                    PdfColors.green,
-                  ),
-                  _buildStatBox(
-                    'Fehlend',
-                    '${missingActions.length}',
-                    PdfColors.orange,
-                  ),
-                  _buildStatBox(
-                    'Gesamt',
-                    '${completedActions.length + missingActions.length}',
-                    PdfColors.blue,
-                  ),
-                  _buildStatBox(
-                    'Dauer',
-                    '$_elapsedSeconds s',
-                    PdfColors.purple,
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 20),
-
-              // Completed Actions Section
-              pw.Container(
-                padding: const pw.EdgeInsets.all(15),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.green50,
-                  border: pw.Border.all(color: PdfColors.green200, width: 2),
-                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Row(
-                      children: [
-                        pw.Container(
-                          width: 4,
-                          height: 20,
-                          color: PdfColors.green,
-                        ),
-                        pw.SizedBox(width: 10),
-                        pw.Text(
-                          'DURCHGEFÜHRTE MASSNAHMEN (${completedActions.length})',
-                          style: pw.TextStyle(
-                            fontSize: 16,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.green900,
-                          ),
-                        ),
-                      ],
-                    ),
-                    pw.SizedBox(height: 10),
-                    ...sortedCompleted.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final action = entry.value;
-                      final timestamp = action['timestamp'] as DateTime;
-                      final elapsed = timestamp.difference(firstTimeStamp);
-                      final elapsedTime =
-                          '+${elapsed.inMinutes}:${(elapsed.inSeconds % 60).toString().padLeft(2, '0')} min';
-
-                      return pw.Container(
-                        margin: const pw.EdgeInsets.symmetric(vertical: 3),
-                        padding: const pw.EdgeInsets.all(8),
-                        decoration: pw.BoxDecoration(
-                          color: index % 2 == 0 ? PdfColors.white : PdfColors.grey100,
-                          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
-                        ),
-                        child: pw.Row(
-                          children: [
-                            pw.Container(
-                              width: 25,
-                              alignment: pw.Alignment.center,
-                              child: pw.Text(
-                                '${index + 1}.',
-                                style: pw.TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: pw.FontWeight.bold,
-                                  color: PdfColors.grey700,
-                                ),
-                              ),
-                            ),
-                            pw.SizedBox(width: 10),
-                            pw.Expanded(
-                              flex: 2,
-                              child: pw.Text(
-                                action['schema'],
-                                style: pw.TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            pw.Expanded(
-                              flex: 5,
-                              child: pw.Text(
-                                action['action'],
-                                style: const pw.TextStyle(fontSize: 10),
-                              ),
-                            ),
-                            pw.Container(
-                              padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: pw.BoxDecoration(
-                                color: PdfColors.grey300,
-                                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
-                              ),
-                              child: pw.Text(
-                                elapsedTime,
-                                style: pw.TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-                  ],
-                ),
-              ),
-
-              // Missing Actions Section (only required ones for this qualification)
-              if (missingActions.isNotEmpty) ...[
-                pw.SizedBox(height: 20),
-                pw.Container(
-                  padding: const pw.EdgeInsets.all(15),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.orange50,
-                    border: pw.Border.all(color: PdfColors.orange200, width: 2),
-                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-                  ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Row(
-                        children: [
-                          pw.Container(
-                            width: 4,
-                            height: 20,
-                            color: PdfColors.orange,
-                          ),
-                          pw.SizedBox(width: 10),
-                          pw.Text(
-                            'FEHLENDE VERPFLICHTENDE MASSNAHMEN (${missingActions.length})',
-                            style: pw.TextStyle(
-                              fontSize: 16,
-                              fontWeight: pw.FontWeight.bold,
-                              color: PdfColors.orange900,
-                            ),
-                          ),
-                        ],
-                      ),
-                      pw.SizedBox(height: 10),
-                      ...missingActions.map((action) => pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                        child: pw.Row(
-                          children: [
-                            pw.Container(
-                              width: 6,
-                              height: 6,
-                              decoration: const pw.BoxDecoration(
-                                color: PdfColors.orange,
-                                shape: pw.BoxShape.circle,
-                              ),
-                            ),
-                            pw.SizedBox(width: 8),
-                            pw.Text(
-                              "${action['schema']} - ${action['action']}",
-                              style: const pw.TextStyle(fontSize: 10),
-                            ),
-                          ],
-                        ),
-                      )),
-                    ],
-                  ),
-                ),
-              ],
-
-              // Footer
-              pw.SizedBox(height: 30),
-              pw.Divider(color: PdfColors.grey400),
-              pw.SizedBox(height: 10),
-              pw.Text(
-                'Dieser Bericht dient ausschließlich Ausbildungs- und Trainingszwecken im Rettungsdienst.',
-                style: pw.TextStyle(
-                  fontSize: 9,
-                  color: PdfColors.grey600,
-                  fontStyle: pw.FontStyle.italic,
-                ),
-                textAlign: pw.TextAlign.center,
-              ),
-            ];
-          },
-        ),
-      );
-    }
-    await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save());
-  }
-
-  pw.Widget _buildStatBox(String label, String value, PdfColor color) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(10),
-      decoration: pw.BoxDecoration(
-        color: PdfColors.white,
-        border: pw.Border.all(color: color, width: 2),
-        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
-      ),
-      child: pw.Column(
-        children: [
-          pw.Text(
-            value,
-            style: pw.TextStyle(
-              fontSize: 18,
-              fontWeight: pw.FontWeight.bold,
-              color: color,
-            ),
-          ),
-          pw.SizedBox(height: 4),
-          pw.Text(
-            label,
-            style: pw.TextStyle(
-              fontSize: 9,
-              color: PdfColors.grey700,
-            ),
-          ),
-        ],
-      ),
+    await PdfService.generateNormalPdf(
+      completedActions: completedActions,
+      missingActions: missingActions,
+      userQualification: widget.userQualification,
+      elapsedSeconds: _elapsedSeconds,
     );
   }
 
@@ -534,10 +287,65 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     );
   }
 
+  void _showEndScenarioDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.stop_circle, color: Colors.red),
+            SizedBox(width: 12),
+            Text('Fallbeispiel beenden?'),
+          ],
+        ),
+        content: const Text(
+          'Alle Timer werden gestoppt und das Ergebnis angezeigt.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Abbrechen'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _endScenario();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text(
+              'Beenden',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _endScenario() {
+    _timer.cancel();
+    _arrivalCheckTimer.cancel();
+    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
+      completedActions,
+      widget.userQualification,
+    );
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => MeasuresOverviewScreen(
+          completedActions: completedActions,
+          missingActions: missingActions,
+          userQualification: widget.userQualification,
+        ),
+      ),
+    );
+  }
+
   Widget _buildVehicleArrivalCard() {
-    // Filter vehicles that are coming (status 2) and have arrival times
+    // Filter vehicles that are coming and have arrival times
     final incomingVehicles = widget.vehicleStatus.entries
-        .where((e) => e.value == 2 && widget.vehicleArrivalTimes[e.key] != null)
+        .where((e) =>
+            e.value == VehicleStatus.kommt &&
+            _vehicleArrivalTimes[e.key] != null)
         .toList();
 
     if (incomingVehicles.isEmpty) {
@@ -577,7 +385,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             const SizedBox(height: 12),
             ...incomingVehicles.map((entry) {
               final vehicle = entry.key;
-              final arrivalTime = widget.vehicleArrivalTimes[vehicle]!;
+              final arrivalTime = _vehicleArrivalTimes[vehicle]!;
               final now = DateTime.now();
               final diff = arrivalTime.difference(now);
               final hasArrived = _arrivedVehicles.contains(vehicle);
@@ -670,7 +478,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Schemata - Zeit: $_elapsedSeconds s (${widget.userQualification.name})'),
+        title: Text(
+            'Schemata – $_formattedTime (${widget.userQualification.name})'),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -681,6 +490,33 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           ),
         ),
         actions: [
+          // Pause/Weiter
+          IconButton(
+            icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
+            tooltip: _isPaused ? 'Timer fortsetzen' : 'Timer pausieren',
+            onPressed: () => setState(() => _isPaused = !_isPaused),
+          ),
+          // Alle Expand / Collapse
+          IconButton(
+            icon: Icon(_allExpanded ? Icons.unfold_less : Icons.unfold_more),
+            tooltip: _allExpanded ? 'Alle einklappen' : 'Alle ausklappen',
+            onPressed: () => setState(() => _allExpanded = !_allExpanded),
+          ),
+          // Dark Mode
+          IconButton(
+            icon: Icon(
+              themeModeNotifier.value == ThemeMode.dark
+                  ? Icons.light_mode
+                  : Icons.dark_mode,
+            ),
+            tooltip: 'Dark Mode umschalten',
+            onPressed: () {
+              themeModeNotifier.value =
+                  themeModeNotifier.value == ThemeMode.dark
+                      ? ThemeMode.light
+                      : ThemeMode.dark;
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.list),
             tooltip: 'Übersicht',
@@ -707,49 +543,56 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             tooltip: 'Hinweise & Quellen',
             onPressed: _showMedicalSourcesDialog,
           ),
+          IconButton(
+            icon: const Icon(Icons.stop_circle, color: Colors.white),
+            tooltip: 'Fallbeispiel beenden',
+            onPressed: _showEndScenarioDialog,
+          ),
         ],
       ),
-      body: ListView(
+      body: Column(
+        children: [
+          // Gesamtfortschrittsbalken
+          _buildProgressBar(),
+          // Pause-Banner
+          if (_isPaused)
+            Container(
+              width: double.infinity,
+              color: Colors.amber.shade700,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.pause_circle, color: Colors.white, size: 18),
+                  SizedBox(width: 8),
+                  Text(
+                    'Timer pausiert',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: ListView(
         children: [
           // Vehicle arrival status
           _buildVehicleArrivalCard(),
 
           ...schemas.keys.map((schema) {
-            bool allCompleted = schemas[schema]!.every((action) =>
-                completedActions
-                    .any((e) => e['schema'] == schema && e['action'] == action));
+            final schemaColor = getSchemaColor(schema);
+            final schemaBg = getSchemaBackgroundColor(schema);
+            bool allCompleted = schemas[schema]!.every((action) {
+              final req = MeasureRequirements.getRequirement(schema, action);
+              if (req != null &&
+                  req.getRequirementLevel(widget.userQualification) ==
+                      RequirementLevel.notApplicable) return true;
+              return completedActions
+                  .any((e) => e.schema == schema && e.action == action);
+            });
 
-            // Get icon for schema
-            IconData schemaIcon = Icons.checklist;
-            if (schema.contains('Atemwege') || schema == 'a' || schema == 'A') {
-              schemaIcon = Icons.air;
-            } else if (schema.contains('Atmung') || schema == 'b' || schema == 'B') {
-              schemaIcon = Icons.wind_power;
-            } else if (schema.contains('Kreislauf') || schema == 'c' || schema == 'C') {
-              schemaIcon = Icons.favorite;
-            } else if (schema == 'SSSS') {
-              schemaIcon = Icons.security;
-            } else if (schema == 'WASB') {
-              schemaIcon = Icons.psychology;
-            } else if (schema == 'STU') {
-              schemaIcon = Icons.personal_injury;
-            } else if (schema == 'D') {
-              schemaIcon = Icons.visibility;
-            } else if (schema == 'E') {
-              schemaIcon = Icons.thermostat;
-            } else if (schema == 'BE-FAST') {
-              schemaIcon = Icons.emergency;
-            } else if (schema == 'ZOPS') {
-              schemaIcon = Icons.quiz;
-            } else if (schema.contains('Maßnahmen')) {
-              schemaIcon = Icons.medical_services;
-            } else if (schema == 'SAMPLERS') {
-              schemaIcon = Icons.history_edu;
-            } else if (schema == 'OPQRST') {
-              schemaIcon = Icons.description;
-            } else if (schema == 'Nachforderung') {
-              schemaIcon = Icons.phone_in_talk;
-            }
+            final schemaIcon = getSchemaIcon(schema);
 
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -757,8 +600,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(
-                  color: allCompleted ? Colors.green : Colors.grey.shade300,
-                  width: allCompleted ? 2 : 1,
+                  color: allCompleted ? Colors.green : schemaColor.withOpacity(0.4),
+                  width: allCompleted ? 2 : 1.5,
                 ),
               ),
               child: Theme(
@@ -766,106 +609,185 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                   dividerColor: Colors.transparent,
                 ),
                 child: ExpansionTile(
-                  leading: Icon(
-                    schemaIcon,
-                    color: allCompleted ? Colors.green : Colors.grey.shade600,
+                  key: ValueKey('$schema-$_allExpanded'),
+                  initiallyExpanded: _allExpanded,
+                  leading: Tooltip(
+                    message: getSchemaDescription(schema),
+                    preferBelow: true,
+                    triggerMode: TooltipTriggerMode.tap,
+                    showDuration: const Duration(seconds: 6),
+                    child: Icon(
+                      schemaIcon,
+                      color: allCompleted ? Colors.green : schemaColor,
+                    ),
                   ),
                   title: Text(
                     schema,
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      color: allCompleted ? Colors.green.shade800 : Colors.black87,
+                      color: allCompleted ? Colors.green : schemaColor,
                     ),
                   ),
                   trailing: allCompleted
                       ? const Icon(Icons.check_circle, color: Colors.green)
-                      : const Icon(Icons.expand_more),
-                  backgroundColor: allCompleted
-                      ? Colors.green.withOpacity(0.1)
-                      : Colors.transparent,
+                      : Icon(Icons.expand_more, color: schemaColor),
+                  backgroundColor:
+                      allCompleted ? Colors.green.withOpacity(0.08) : schemaBg,
+                  collapsedBackgroundColor: schemaBg,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  collapsedShape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   children: schemas[schema]!.map((action) {
-                    bool isCompleted = completedActions.any(
-                            (e) => e['schema'] == schema && e['action'] == action);
+                    bool isCompleted = completedActions
+                        .any((e) => e.schema == schema && e.action == action);
+                    final completedEntry = isCompleted
+                        ? completedActions.lastWhere(
+                            (e) => e.schema == schema && e.action == action)
+                        : null;
 
                     // Get requirement info
-                    final requirement = MeasureRequirements.getRequirement(schema, action);
-                    final isOptional = requirement?.isOptionalFor(widget.userQualification) ?? false;
-                    final canPerform = requirement?.canPerformWithQualification(widget.userQualification) ?? true;
-                    final requirementLevel = requirement?.getRequirementLevel(widget.userQualification);
+                    final requirement =
+                        MeasureRequirements.getRequirement(schema, action);
+                    final isOptional =
+                        requirement?.isOptionalFor(widget.userQualification) ??
+                            false;
+                    final canPerform = requirement
+                            ?.canPerformWithQualification(
+                                widget.userQualification) ??
+                        true;
+                    final requirementLevel =
+                        requirement?.getRequirementLevel(widget.userQualification);
 
                     return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(8),
                         color: isCompleted
-                            ? Colors.green.shade100
-                            : (isOptional ? Colors.blue.shade50 : Colors.grey.shade100),
-                        border: isOptional && !isCompleted
-                            ? Border.all(color: Colors.blue.shade300, width: 1.5)
-                            : null,
+                            ? Colors.green.withOpacity(0.12)
+                            : (isOptional
+                                ? Colors.blue.withOpacity(0.06)
+                                : null),
+                        border: isCompleted
+                            ? Border.all(
+                                color: Colors.green.withOpacity(0.4), width: 1)
+                            : (isOptional && !isCompleted
+                                ? Border.all(
+                                    color: Colors.blue.shade300, width: 1.5)
+                                : null),
                       ),
                       child: ListTile(
+                        dense: true,
                         leading: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              isCompleted ? Icons.check_circle : Icons.radio_button_unchecked,
-                              color: isCompleted ? Colors.green : (isOptional ? Colors.blue : Colors.grey),
+                              isCompleted
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              color: isCompleted
+                                  ? Colors.green
+                                  : (isOptional
+                                      ? Colors.blue
+                                      : Colors.grey),
                             ),
                             if (isOptional && !isCompleted) ...[
                               const SizedBox(width: 4),
                               Icon(Icons.help_outline,
-                                  color: Colors.blue.shade600, size: 16),
+                                  color: Colors.blue.shade600, size: 14),
                             ],
                             if (!canPerform) ...[
                               const SizedBox(width: 4),
                               Icon(Icons.lock,
-                                  color: Colors.orange.shade700, size: 16),
+                                  color: Colors.orange.shade700, size: 14),
+                            ],
+                            if (isCompleted) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.undo,
+                                  color: Colors.green.withOpacity(0.5),
+                                  size: 12),
                             ],
                           ],
                         ),
                         title: Text(
                           action,
                           style: TextStyle(
+                            fontSize: 13,
                             color: isCompleted
-                                ? Colors.green.shade900
-                                : (!canPerform ? Colors.grey.shade600 : Colors.black87),
-                            fontWeight: isCompleted ? FontWeight.w500 : FontWeight.normal,
-                            decoration: !canPerform ? TextDecoration.lineThrough : null,
+                                ? Colors.green.shade800
+                                : (!canPerform
+                                    ? Colors.grey.shade500
+                                    : null),
+                            fontWeight: isCompleted
+                                ? FontWeight.w500
+                                : FontWeight.normal,
+                            decoration: !canPerform
+                                ? TextDecoration.lineThrough
+                                : null,
                           ),
                         ),
-                        subtitle: !canPerform
+                        subtitle: isCompleted && completedEntry != null
                             ? Text(
-                          'Nicht verfügbar für ${widget.userQualification.name}',
-                          style: TextStyle(
-                            color: Colors.orange.shade700,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        )
-                            : (isOptional
-                            ? Text(
-                          requirementLevel == RequirementLevel.expected ? 'Erwartet' : 'Optional',
-                          style: TextStyle(
-                            color: requirementLevel == RequirementLevel.expected
-                                ? Colors.amber.shade700
-                                : Colors.blue.shade700,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        )
-                            : null),
-                        onTap: (isCompleted || !canPerform)
-                            ? null
-                            : () {
-                          setState(() {
-                            completedActions.add({
-                              'schema': schema,
-                              'action': action,
-                              'timestamp': DateTime.now()
-                            });
-                          });
-                        },
+                                _relativeTime(completedEntry.timestamp),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.green.shade600,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              )
+                            : (!canPerform
+                                ? Text(
+                                    'Nicht verfügbar für ${widget.userQualification.name}',
+                                    style: TextStyle(
+                                      color: Colors.orange.shade700,
+                                      fontSize: 11,
+                                    ),
+                                  )
+                                : (isOptional
+                                    ? Text(
+                                        requirementLevel ==
+                                                RequirementLevel.expected
+                                            ? 'Erwartet'
+                                            : 'Optional',
+                                        style: TextStyle(
+                                          color: requirementLevel ==
+                                                  RequirementLevel.expected
+                                              ? Colors.amber.shade700
+                                              : Colors.blue.shade700,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      )
+                                    : null)),
+                        onTap: canPerform && !isCompleted
+                            ? () {
+                                setState(() {
+                                  completedActions.add(CompletedAction(
+                                    schema: schema,
+                                    action: action,
+                                    timestamp: DateTime.now(),
+                                  ));
+                                });
+                              }
+                            : null,
+                        onLongPress: isCompleted
+                            ? () {
+                                setState(() {
+                                  completedActions.removeWhere((e) =>
+                                      e.schema == schema &&
+                                      e.action == action);
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content:
+                                        Text('"$action" rückgängig gemacht'),
+                                    duration: const Duration(seconds: 2),
+                                    backgroundColor: Colors.orange,
+                                  ),
+                                );
+                              }
+                            : null,
                       ),
                     );
                   }).toList(),
@@ -873,7 +795,56 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
               ),
             );
           }).toList(),
-          const SizedBox(height: 20), // Bottom padding
+              const SizedBox(height: 20), // Bottom padding
+            ],
+          ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressBar() {
+    final total = schemas.keys.length;
+    final done = _completedSchemaCount;
+    final progress = total > 0 ? done / total : 0.0;
+    final color = progress >= 1.0
+        ? Colors.green
+        : progress >= 0.5
+            ? Colors.blue
+            : Colors.orange;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Fortschritt: $done / $total Schemata',
+                style: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+              Text(
+                '${(progress * 100).toStringAsFixed(0)} %',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: color),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 8,
+              backgroundColor: Colors.grey.shade300,
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
         ],
       ),
     );
