@@ -6,6 +6,8 @@ import 'package:rd_fallbeispiel/Screens/result_screen.dart';
 
 import '../main.dart';
 import '../measure_requirements.dart';
+import '../models/session_record.dart';
+import '../services/history_service.dart';
 import '../services/pdf_service.dart';
 import '../utils/schema_colors.dart';
 import '../utils/schema_descriptions.dart';
@@ -16,6 +18,7 @@ class ResuscitationScreen extends StatefulWidget {
   final bool isChildResuscitation;
   final Map<String, int?> vehicleArrivalMinutes;
   final Qualification userQualification;
+  final String? scenarioName;
 
   const ResuscitationScreen({
     super.key,
@@ -23,6 +26,7 @@ class ResuscitationScreen extends StatefulWidget {
     required this.isChildResuscitation,
     required this.vehicleArrivalMinutes,
     required this.userQualification,
+    this.scenarioName,
   });
 
   @override
@@ -609,13 +613,32 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     );
   }
 
-  void _endScenario() {
+  Future<void> _endScenario() async {
     _timer.cancel();
     _arrivalCheckTimer.cancel();
     final missingActions = MeasureRequirements.calculateMissingRequiredActions(
       completedActions,
       widget.userQualification,
     );
+
+    // Auto-save session to history
+    final scenarioStart =
+        resuscitationStart ?? DateTime.now().subtract(Duration(seconds: _elapsedSeconds));
+    final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
+    final record = SessionRecord(
+      id: sessionId,
+      startTime: scenarioStart,
+      durationSeconds: _elapsedSeconds,
+      qualification: widget.userQualification.name,
+      isResuscitation: true,
+      isChildResuscitation: widget.isChildResuscitation,
+      completedCount: completedActions.length,
+      missingCount: missingActions.length,
+      scenarioName: widget.scenarioName,
+    );
+    await HistoryService.saveSession(record);
+
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (context) => MeasuresOverviewScreen(
@@ -627,6 +650,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           compressionCount: _compressionCount,
           ventilationCount: _ventilationCount,
           resuscitationStart: resuscitationStart,
+          sessionId: sessionId,
+          scenarioName: widget.scenarioName,
         ),
       ),
     );
