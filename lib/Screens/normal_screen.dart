@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../measure_requirements.dart';
+import '../models/session_record.dart';
+import '../services/history_service.dart';
 import '../services/pdf_service.dart';
 import '../utils/schema_colors.dart';
 import '../utils/schema_descriptions.dart';
@@ -14,12 +16,14 @@ class SchemaSelectionScreen extends StatefulWidget {
   final Map<String, VehicleStatus> vehicleStatus;
   final Map<String, int?> vehicleArrivalMinutes;
   final Qualification userQualification;
+  final String? scenarioName;
 
   const SchemaSelectionScreen({
     super.key,
     required this.vehicleStatus,
     required this.vehicleArrivalMinutes,
     required this.userQualification,
+    this.scenarioName,
   });
 
   @override
@@ -44,6 +48,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   late DateTime _scenarioStart;
   late final Map<String, DateTime?> _vehicleArrivalTimes;
   bool _allExpanded = false;
+  String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
 
   // Track which vehicles have shown arrival notification
   Set<String> _arrivedVehicles = {};
@@ -126,6 +132,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   void dispose() {
     _timer.cancel();
     _arrivalCheckTimer.cancel();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -322,19 +329,37 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     );
   }
 
-  void _endScenario() {
+  Future<void> _endScenario() async {
     _timer.cancel();
     _arrivalCheckTimer.cancel();
     final missingActions = MeasureRequirements.calculateMissingRequiredActions(
       completedActions,
       widget.userQualification,
     );
+
+    // Auto-save session to history
+    final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
+    final record = SessionRecord(
+      id: sessionId,
+      startTime: _scenarioStart,
+      durationSeconds: _elapsedSeconds,
+      qualification: widget.userQualification.name,
+      isResuscitation: false,
+      completedCount: completedActions.length,
+      missingCount: missingActions.length,
+      scenarioName: widget.scenarioName,
+    );
+    await HistoryService.saveSession(record);
+
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (context) => MeasuresOverviewScreen(
           completedActions: completedActions,
           missingActions: missingActions,
           userQualification: widget.userQualification,
+          sessionId: sessionId,
+          scenarioName: widget.scenarioName,
         ),
       ),
     );
@@ -574,13 +599,45 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                 ],
               ),
             ),
+          // Schema-Suchleiste
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: 'Schema suchen...',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              ),
+              onChanged: (v) => setState(() => _searchQuery = v),
+            ),
+          ),
           Expanded(
             child: ListView(
         children: [
           // Vehicle arrival status
           _buildVehicleArrivalCard(),
 
-          ...schemas.keys.map((schema) {
+          ...schemas.keys.where((schema) {
+            if (_searchQuery.isEmpty) return true;
+            final q = _searchQuery.toLowerCase();
+            return schema.toLowerCase().contains(q) ||
+                (schemas[schema] ?? [])
+                    .any((a) => a.toLowerCase().contains(q));
+          }).map((schema) {
             final schemaColor = getSchemaColor(schema);
             final schemaBg = getSchemaBackgroundColor(schema);
             bool allCompleted = schemas[schema]!.every((action) {

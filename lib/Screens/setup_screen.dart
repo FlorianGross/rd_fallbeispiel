@@ -3,7 +3,10 @@ import 'package:rd_fallbeispiel/Screens/resuscitation_screen.dart';
 
 import '../main.dart';
 import '../measure_requirements.dart';
+import '../models/scenario.dart';
+import 'history_screen.dart';
 import 'normal_screen.dart';
+import 'scenario_library_screen.dart';
 
 class VehicleArrival {
   final String vehicleName;
@@ -29,6 +32,7 @@ class _QualificationSelectionScreenState
   Map<String, int?> vehicleArrivalMinutes = {};
   late bool isResuscitation = false;
   late bool isChildResuscitation = false;
+  PredefinedScenario? _selectedScenario;
 
   final Map<VehicleStatus, Color> statusColors = {
     VehicleStatus.none: Colors.grey,
@@ -216,6 +220,14 @@ class _QualificationSelectionScreenState
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.history, color: Colors.white),
+            tooltip: 'Trainings-Verlauf',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const HistoryScreen()),
+            ),
+          ),
           ValueListenableBuilder<ThemeMode>(
             valueListenable: themeModeNotifier,
             builder: (_, mode, __) => IconButton(
@@ -237,6 +249,92 @@ class _QualificationSelectionScreenState
         padding: const EdgeInsets.all(16.0),
         child: ListView(
           children: [
+            // Szenario-Bibliothek Section
+            _buildSectionCard(
+              icon: Icons.library_books,
+              title: 'Szenario',
+              subtitle: 'Optional: Wähle ein vordefiniertes Fallbeispiel',
+              child: Column(
+                children: [
+                  if (_selectedScenario != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _selectedScenario!.color.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: _selectedScenario!.color.withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(_selectedScenario!.icon,
+                              color: _selectedScenario!.color, size: 28),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _selectedScenario!.name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15),
+                                ),
+                                Text(
+                                  _selectedScenario!.category,
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon:
+                                const Icon(Icons.close, color: Colors.grey),
+                            onPressed: () =>
+                                setState(() => _selectedScenario = null),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.search),
+                      label: Text(_selectedScenario == null
+                          ? 'Szenario aus Bibliothek wählen'
+                          : 'Szenario ändern'),
+                      onPressed: () async {
+                        final result =
+                            await Navigator.push<PredefinedScenario>(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  const ScenarioLibraryScreen()),
+                        );
+                        if (result != null) {
+                          setState(() {
+                            _selectedScenario = result;
+                            if (result.suggestResuscitation) {
+                              isResuscitation = true;
+                            }
+                          });
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
             // Qualifications Section
             _buildSectionCard(
               icon: Icons.school,
@@ -499,11 +597,13 @@ class _QualificationSelectionScreenState
                                     isChildResuscitation: isChildResuscitation,
                                     vehicleArrivalMinutes: arrivalsToPass,
                                     userQualification: _getQualificationEnum(),
+                                    scenarioName: _selectedScenario?.name,
                                   )
                                 : SchemaSelectionScreen(
                                     vehicleStatus: vehicleStatus,
                                     vehicleArrivalMinutes: arrivalsToPass,
                                     userQualification: _getQualificationEnum(),
+                                    scenarioName: _selectedScenario?.name,
                                   ),
                           ),
                         );

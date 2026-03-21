@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../measure_requirements.dart';
+import '../services/history_service.dart';
 import '../utils/schema_icons.dart';
 
 class MeasuresOverviewScreen extends StatefulWidget {
@@ -11,6 +12,8 @@ class MeasuresOverviewScreen extends StatefulWidget {
   final int? compressionCount;
   final int? ventilationCount;
   final DateTime? resuscitationStart;
+  final String? sessionId;
+  final String? scenarioName;
 
   const MeasuresOverviewScreen({
     super.key,
@@ -22,6 +25,8 @@ class MeasuresOverviewScreen extends StatefulWidget {
     this.compressionCount,
     this.ventilationCount,
     this.resuscitationStart,
+    this.sessionId,
+    this.scenarioName,
   });
 
   @override
@@ -30,13 +35,22 @@ class MeasuresOverviewScreen extends StatefulWidget {
 
 class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
   late DateTime firstTimeStamp;
+  late final TextEditingController _notesCtrl;
+  bool _savingNotes = false;
 
   @override
-  initState() {
+  void initState() {
     super.initState();
     if (widget.completedActions.isNotEmpty) {
       firstTimeStamp = widget.completedActions.first.timestamp;
     }
+    _notesCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _notesCtrl.dispose();
+    super.dispose();
   }
 
   String _formatTimeDifference(int seconds) {
@@ -489,6 +503,30 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // Sitzung gespeichert Banner
+        if (widget.sessionId != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.green.shade200),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.green.shade700, size: 20),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Sitzung automatisch gespeichert',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
         // Qualification Info Card
         if (widget.userQualification != null)
           Card(
@@ -535,6 +573,15 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
+                          if (widget.scenarioName != null)
+                            Text(
+                              widget.scenarioName!,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.indigo.shade400,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
                         ],
                       ),
                     ],
@@ -790,6 +837,80 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                       ),
                     );
                   }).toList(),
+                ],
+              ),
+            ),
+          ),
+        ],
+
+        // Notes card (only when session is saved)
+        if (widget.sessionId != null) ...[
+          const SizedBox(height: 16),
+          Card(
+            elevation: 3,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.note_alt, color: Colors.teal.shade600),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Notizen zur Übung',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _notesCtrl,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: 'Was lief gut? Was kann verbessert werden?',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.all(12),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: _savingNotes
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.save),
+                      label: const Text('Notiz speichern'),
+                      onPressed: _savingNotes
+                          ? null
+                          : () async {
+                              setState(() => _savingNotes = true);
+                              await HistoryService.updateSessionNotes(
+                                  widget.sessionId!, _notesCtrl.text);
+                              if (mounted) {
+                                setState(() => _savingNotes = false);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Notiz gespeichert!'),
+                                    backgroundColor: Colors.green,
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
