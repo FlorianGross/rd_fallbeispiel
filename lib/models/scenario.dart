@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../measure_requirements.dart';
+
 class PredefinedScenario {
   final String name;
   final String description;
@@ -10,6 +12,10 @@ class PredefinedScenario {
   final String clinicalPicture;
   final String difficulty;
 
+  /// Situative Schemata, die zusätzlich zu [MeasureRequirements.baseSchemas]
+  /// bewertet werden (z. B. BE-FAST beim Schlaganfall, STU beim Trauma).
+  final Set<String> extraSchemas;
+
   const PredefinedScenario({
     required this.name,
     required this.description,
@@ -19,7 +25,12 @@ class PredefinedScenario {
     this.suggestResuscitation = false,
     required this.clinicalPicture,
     required this.difficulty,
+    this.extraSchemas = const {},
   });
+
+  /// Alle Schemata, die in diesem Szenario bewertet werden.
+  Set<String> get scoredSchemas =>
+      {...MeasureRequirements.baseSchemas, ...extraSchemas};
 }
 
 class PredefinedScenarios {
@@ -35,6 +46,7 @@ class PredefinedScenarios {
           'Ausstrahlung in den linken Arm, Schweißausbruch, Übelkeit. '
           '"Wie ein Stein auf der Brust." RR 90/60 mmHg, Puls 110/min, SpO₂ 94 %.',
       difficulty: 'Mittel',
+      extraSchemas: {'OPQRST'},
     ),
     PredefinedScenario(
       name: 'Schlaganfall (Stroke)',
@@ -47,6 +59,7 @@ class PredefinedScenarios {
           'verwaschener Sprache. Ereignis seit ~45 min. '
           'GCS 12, RR 180/100 mmHg, Puls 88/min, SpO₂ 96 %.',
       difficulty: 'Mittel',
+      extraSchemas: {'BE-FAST', 'ZOPS'},
     ),
     PredefinedScenario(
       name: 'Polytrauma (Verkehrsunfall)',
@@ -59,6 +72,7 @@ class PredefinedScenarios {
           'Bewusstseinsgetrübt (GCS 9), Deformierung Lenkrad, Sicherheitsgurt eingeschnitten. '
           'Tachykardie 130/min, RR 80/50 mmHg. Verdacht: Thoraxtrauma + SHT.',
       difficulty: 'Schwer',
+      extraSchemas: {'STU'},
     ),
     PredefinedScenario(
       name: 'Kreislaufstillstand (Reanimation)',
@@ -84,6 +98,7 @@ class PredefinedScenarios {
           'Kalter Schweiß, Zittern, verwirrt. Letzte Insulingabe vor ~3 h, '
           'letzte Mahlzeit vor ~8 h. BZ 32 mg/dl.',
       difficulty: 'Einfach',
+      extraSchemas: {'ZOPS'},
     ),
     PredefinedScenario(
       name: 'Akuter Asthmaanfall',
@@ -120,6 +135,7 @@ class PredefinedScenarios {
           'Schmerzen in der rechten Hüfte, Bein in Außenrotation und Verkürzung. '
           'Liegedauer ~2 h, RR 130/85 mmHg, AF 18/min.',
       difficulty: 'Einfach',
+      extraSchemas: {'STU', 'OPQRST'},
     ),
     PredefinedScenario(
       name: 'Medikamenten-Intoxikation',

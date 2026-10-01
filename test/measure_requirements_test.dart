@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rd_fallbeispiel/measure_requirements.dart';
+import 'package:rd_fallbeispiel/models/scenario.dart';
 import 'package:rd_fallbeispiel/models/session_record.dart';
 import 'package:rd_fallbeispiel/services/history_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -41,14 +42,67 @@ void main() {
     });
   });
 
+  group('Szenario-spezifische Bewertung', () {
+    PredefinedScenario byName(String name) =>
+        PredefinedScenarios.scenarios.firstWhere((s) => s.name == name);
+
+    test('alle Schema-Namen existieren im Katalog', () {
+      final known = MeasureRequirements.requirements.keys.toSet();
+      expect(known.containsAll(MeasureRequirements.baseSchemas), isTrue);
+      expect(known.containsAll(MeasureRequirements.resuscitationSchemas),
+          isTrue);
+      for (final s in PredefinedScenarios.scenarios) {
+        expect(known.containsAll(s.extraSchemas), isTrue, reason: s.name);
+      }
+    });
+
+    test('BE-FAST zählt beim Schlaganfall, nicht beim Sturz', () {
+      Set<String> missingSchemas(String scenario) =>
+          MeasureRequirements.calculateMissingRequiredActions(
+            [],
+            Qualification.RS,
+            onlySchemas: byName(scenario).scoredSchemas,
+          ).map((m) => m.schema).toSet();
+
+      expect(missingSchemas('Schlaganfall (Stroke)'), contains('BE-FAST'));
+      expect(missingSchemas('Sturz / Schenkelhalsfraktur'),
+          isNot(contains('BE-FAST')));
+      expect(missingSchemas('Sturz / Schenkelhalsfraktur'), contains('STU'));
+    });
+  });
+
   group('isSchemaComplete', () {
     test('offene optionale Maßnahmen blockieren den Abschluss nicht', () {
-      // 'Maßnahmen' enthält nur optionale/erwartete Punkte; für SAN sind
-      // Sauerstoffgabe und Wärmeerhalt optional.
+      // Für SAN: alle verpflichtenden/erwarteten Punkte von 'a' erledigen,
+      // optionale (z. B. Zahnstatus) offen lassen.
+      final counted = MeasureRequirements.requirements['a']!
+          .where((m) => m.countsForSchemaCompletion(Qualification.SAN))
+          .map((m) => _done('a', m.action))
+          .toList();
       expect(
-        MeasureRequirements.isSchemaComplete('Maßnahmen', [], Qualification.SAN),
+        MeasureRequirements.isSchemaComplete('a', counted, Qualification.SAN),
         isTrue,
       );
+      expect(
+        MeasureRequirements.requirements['a']!.length > counted.length,
+        isTrue,
+        reason: 'Test braucht mindestens eine optionale Maßnahme',
+      );
+    });
+
+    test('rein optionales Schema ist erst nach einer Maßnahme erledigt', () {
+      expect(
+        MeasureRequirements.isSchemaComplete('4H', [], Qualification.RS),
+        isFalse,
+      );
+      expect(
+        MeasureRequirements.isSchemaComplete(
+            '4H', [_done('4H', 'Hypoxie')], Qualification.RS),
+        isTrue,
+      );
+      expect(
+          MeasureRequirements.hasCountedMeasures('4H', Qualification.RS),
+          isFalse);
     });
 
     test('erwartete Maßnahmen müssen erledigt sein', () {

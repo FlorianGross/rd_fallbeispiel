@@ -775,6 +775,31 @@ class MeasureRequirements {
     );
   }
 
+  /// Schemata, die bei jedem Fallbeispiel (ohne Reanimation) bewertet werden.
+  /// Situative Schemata (STU, BE-FAST, ZOPS, OPQRST) kommen je nach Szenario
+  /// über [PredefinedScenario.extraSchemas] hinzu.
+  static const Set<String> baseSchemas = {
+    'SSSS',
+    'Erster Eindruck',
+    'WASB',
+    'c/x',
+    'a',
+    'b',
+    'c',
+    'A',
+    'B',
+    'C',
+    'D',
+    'E',
+    'SAMPLERS',
+    '4H',
+    'HITS',
+    'Maßnahmen',
+    'Maßnahmen (erweitert)',
+    'Übergabe (ISBAR)',
+    'Nachforderung',
+  };
+
   /// Schemata, die bei einer Reanimation bewertet werden. Anamnese- und
   /// Untersuchungsschemata (SAMPLERS, OPQRST, STU, …) sind während einer
   /// laufenden CPR nicht zu erwarten und werden daher nicht als fehlend gezählt.
@@ -790,18 +815,30 @@ class MeasureRequirements {
     'Nachforderung',
   };
 
+  /// Hat das Schema für diese Qualifikation verpflichtende oder erwartete
+  /// Maßnahmen? Rein optionale Schemata zählen nicht zum Fortschritt.
+  static bool hasCountedMeasures(
+      String schema, Qualification userQualification) {
+    final measures = requirements[schema] ?? const <MeasureRequirement>[];
+    return measures.any((m) => m.countsForSchemaCompletion(userQualification));
+  }
+
   /// Prüft, ob alle für die Qualifikation relevanten (verpflichtenden oder
-  /// erwarteten) Maßnahmen eines Schemas durchgeführt wurden.
+  /// erwarteten) Maßnahmen eines Schemas durchgeführt wurden. Ein rein
+  /// optionales Schema gilt erst als erledigt, wenn darin etwas getan wurde.
   static bool isSchemaComplete(
     String schema,
     List<CompletedAction> completedActions,
     Qualification userQualification,
   ) {
     final measures = requirements[schema] ?? const <MeasureRequirement>[];
-    return measures
-        .where((m) => m.countsForSchemaCompletion(userQualification))
-        .every((m) => completedActions
-            .any((e) => e.schema == schema && e.action == m.action));
+    final counted =
+        measures.where((m) => m.countsForSchemaCompletion(userQualification));
+    if (counted.isEmpty) {
+      return completedActions.any((e) => e.schema == schema);
+    }
+    return counted.every((m) => completedActions
+        .any((e) => e.schema == schema && e.action == m.action));
   }
 
   /// Anzahl der durchgeführten Maßnahmen, die verpflichtend sind – Grundlage

@@ -598,13 +598,13 @@ class _QualificationSelectionScreenState
                                     isChildResuscitation: isChildResuscitation,
                                     vehicleArrivalMinutes: arrivalsToPass,
                                     userQualification: _getQualificationEnum(),
-                                    scenarioName: _selectedScenario?.name,
+                                    scenario: _selectedScenario,
                                   )
                                 : SchemaSelectionScreen(
                                     vehicleStatus: vehicleStatus,
                                     vehicleArrivalMinutes: arrivalsToPass,
                                     userQualification: _getQualificationEnum(),
-                                    scenarioName: _selectedScenario?.name,
+                                    scenario: _selectedScenario,
                                   ),
                           ),
                         );

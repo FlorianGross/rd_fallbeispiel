@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rd_fallbeispiel/Screens/normal_screen.dart';
 import 'package:rd_fallbeispiel/measure_requirements.dart';
+import 'package:rd_fallbeispiel/models/scenario.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> _openScenario(WidgetTester tester) async {
@@ -52,6 +53,36 @@ void main() {
     expect(find.byType(SchemaSelectionScreen), findsOneWidget);
 
     // Aufräumen, damit keine Timer offen bleiben
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Szenario zeigt Fallbild und markiert nicht bewertete Schemata',
+      (tester) async {
+    final stroke = PredefinedScenarios.scenarios
+        .firstWhere((s) => s.name == 'Schlaganfall (Stroke)');
+    await tester.pumpWidget(MaterialApp(
+      home: SchemaSelectionScreen(
+        vehicleStatus: const {},
+        vehicleArrivalMinutes: const {},
+        userQualification: Qualification.RS,
+        scenario: stroke,
+      ),
+    ));
+    await tester.pump();
+
+    expect(find.text(stroke.name), findsOneWidget);
+    await tester.tap(find.text('Fallbild anzeigen'));
+    await tester.pumpAndSettle();
+    expect(find.text(stroke.clinicalPicture), findsOneWidget);
+
+    // STU und OPQRST werden beim Schlaganfall nicht bewertet
+    await tester.scrollUntilVisible(find.text('STU'), 300,
+        scrollable: find
+            .descendant(
+                of: find.byType(ListView), matching: find.byType(Scrollable))
+            .first);
+    expect(find.text('Nicht bewertet in diesem Szenario'), findsWidgets);
+
     await tester.pumpWidget(const SizedBox());
   });
 }

@@ -6,6 +6,7 @@ import 'package:rd_fallbeispiel/Screens/result_screen.dart';
 
 import '../main.dart';
 import '../measure_requirements.dart';
+import '../models/scenario.dart';
 import '../models/session_record.dart';
 import '../services/history_service.dart';
 import '../services/pdf_service.dart';
@@ -20,7 +21,7 @@ class ResuscitationScreen extends StatefulWidget {
   final bool isChildResuscitation;
   final Map<String, int?> vehicleArrivalMinutes;
   final Qualification userQualification;
-  final String? scenarioName;
+  final PredefinedScenario? scenario;
 
   const ResuscitationScreen({
     super.key,
@@ -28,7 +29,7 @@ class ResuscitationScreen extends StatefulWidget {
     required this.isChildResuscitation,
     required this.vehicleArrivalMinutes,
     required this.userQualification,
-    this.scenarioName,
+    this.scenario,
   });
 
   @override
@@ -733,7 +734,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         widget.userQualification,
         onlySchemas: MeasureRequirements.resuscitationSchemas,
       ),
-      scenarioName: widget.scenarioName,
+      scenarioName: widget.scenario?.name,
     );
     await HistoryService.saveSession(record);
 
@@ -750,7 +751,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           ventilationCount: _ventilationCount,
           resuscitationStart: resuscitationStart,
           sessionId: sessionId,
-          scenarioName: widget.scenarioName,
+          scenarioName: widget.scenario?.name,
           scoredSchemas: MeasureRequirements.resuscitationSchemas,
         ),
       ),

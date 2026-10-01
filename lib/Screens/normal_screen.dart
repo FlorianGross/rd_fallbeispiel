@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../measure_requirements.dart';
+import '../models/scenario.dart';
 import '../models/session_record.dart';
 import '../services/history_service.dart';
 import '../services/pdf_service.dart';
@@ -18,14 +19,16 @@ class SchemaSelectionScreen extends StatefulWidget {
   final Map<String, VehicleStatus> vehicleStatus;
   final Map<String, int?> vehicleArrivalMinutes;
   final Qualification userQualification;
-  final String? scenarioName;
+  /// Gewähltes Fallbeispiel (optional). Bestimmt, welche Schemata bewertet
+  /// werden, und liefert das Fallbild.
+  final PredefinedScenario? scenario;
 
   const SchemaSelectionScreen({
     super.key,
     required this.vehicleStatus,
     required this.vehicleArrivalMinutes,
     required this.userQualification,
-    this.scenarioName,
+    this.scenario,
   });
 
   @override
@@ -84,8 +87,34 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   }
 
   /// Anzahl vollständig abgehakter Schemata (nur verpflichtende + erwartete)
+  /// Bewertete Schemata (null = alle, wenn kein Szenario gewählt ist)
+  Set<String>? get _scoredSchemas => widget.scenario?.scoredSchemas;
+
+  bool _isScored(String schema) => _scoredSchemas?.contains(schema) ?? true;
+
+  /// Bewertete Schemata zuerst, nicht bewertete am Ende (Reihenfolge sonst
+  /// wie im Katalog).
+  List<String> get _orderedSchemas => [
+        ...schemas.keys.where(_isScored),
+        ...schemas.keys.where((s) => !_isScored(s)),
+      ];
+
+  List<MissingAction> _missingActions() =>
+      MeasureRequirements.calculateMissingRequiredActions(
+        completedActions,
+        widget.userQualification,
+        onlySchemas: _scoredSchemas,
+      );
+
+  /// Schemata, die in den Fortschritt eingehen: bewertet und mit mindestens
+  /// einer verpflichtenden/erwarteten Maßnahme für diese Qualifikation.
+  Iterable<String> get _progressSchemas => schemas.keys.where((schema) =>
+      _isScored(schema) &&
+      MeasureRequirements.hasCountedMeasures(
+          schema, widget.userQualification));
+
   int get _completedSchemaCount {
-    return schemas.keys
+    return _progressSchemas
         .where((schema) => MeasureRequirements.isSchemaComplete(
             schema, completedActions, widget.userQualification))
         .length;
@@ -244,10 +273,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   }
 
   Future<void> generatePDF() async {
-    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
-      completedActions,
-      widget.userQualification,
-    );
+    final missingActions = _missingActions();
     await PdfService.generateNormalPdf(
       completedActions: completedActions,
       missingActions: missingActions,
@@ -386,10 +412,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     _timer.cancel();
     _arrivalCheckTimer.cancel();
     _clock.stop();
-    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
-      completedActions,
-      widget.userQualification,
-    );
+    final missingActions = _missingActions();
 
     // Auto-save session to history
     final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
@@ -404,8 +427,9 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       requiredCompletedCount: MeasureRequirements.countCompletedRequiredActions(
         completedActions,
         widget.userQualification,
+        onlySchemas: _scoredSchemas,
       ),
-      scenarioName: widget.scenarioName,
+      scenarioName: widget.scenario?.name,
     );
     await HistoryService.saveSession(record);
 
@@ -417,7 +441,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           missingActions: missingActions,
           userQualification: widget.userQualification,
           sessionId: sessionId,
-          scenarioName: widget.scenarioName,
+          scenarioName: widget.scenario?.name,
+          scoredSchemas: _scoredSchemas,
         ),
       ),
     );
@@ -553,10 +578,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     // Calculate missing required actions for this user
-    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
-      completedActions,
-      widget.userQualification,
-    );
+    final missingActions = _missingActions();
 
     return PopScope(
       // Zurück-Taste/-Geste soll ein laufendes Fallbeispiel nicht
@@ -617,6 +639,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                     completedActions: completedActions,
                     missingActions: missingActions,
                     userQualification: widget.userQualification,
+                    scenarioName: widget.scenario?.name,
+                    scoredSchemas: _scoredSchemas,
                   );
                 }),
               );
@@ -643,6 +667,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
         children: [
           // Gesamtfortschrittsbalken
           _buildProgressBar(),
+          if (widget.scenario != null) _buildScenarioCard(widget.scenario!),
           // Pause-Banner
           if (_isPaused)
             Container(
@@ -695,7 +720,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           // Vehicle arrival status
           _buildVehicleArrivalCard(),
 
-          ...schemas.keys.where((schema) {
+          ..._orderedSchemas.where((schema) {
             if (_searchQuery.isEmpty) return true;
             final q = _searchQuery.toLowerCase();
             return schema.toLowerCase().contains(q) ||
@@ -706,6 +731,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             final schemaBg = getSchemaBackgroundColor(schema);
             final allCompleted = MeasureRequirements.isSchemaComplete(
                 schema, completedActions, widget.userQualification);
+            final scored = _isScored(schema);
 
             final schemaIcon = getSchemaIcon(schema);
 
@@ -743,6 +769,13 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                       color: allCompleted ? Colors.green : schemaColor,
                     ),
                   ),
+                  subtitle: scored
+                      ? null
+                      : Text(
+                          'Nicht bewertet in diesem Szenario',
+                          style: TextStyle(
+                              fontSize: 11, color: context.mutedText),
+                        ),
                   trailing: allCompleted
                       ? const Icon(Icons.check_circle, color: Colors.green)
                       : Icon(Icons.expand_more, color: schemaColor),
@@ -920,8 +953,46 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     );
   }
 
+  /// Fallbild des gewählten Szenarios – einklappbar, damit es während des
+  /// Trainings nachgelesen werden kann, ohne Platz zu blockieren.
+  Widget _buildScenarioCard(PredefinedScenario scenario) {
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: scenario.color.withAlpha(100), width: 1.5),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          leading: Icon(scenario.icon, color: scenario.color),
+          title: Text(
+            scenario.name,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          subtitle: Text(
+            'Fallbild anzeigen',
+            style: TextStyle(fontSize: 12, color: context.mutedText),
+          ),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(scenario.clinicalPicture),
+            if (scenario.extraSchemas.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Zusätzlich bewertet: ${scenario.extraSchemas.join(', ')}',
+                style: TextStyle(fontSize: 12, color: context.mutedText),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildProgressBar() {
-    final total = schemas.keys.length;
+    final total = _progressSchemas.length;
     final done = _completedSchemaCount;
     final progress = total > 0 ? done / total : 0.0;
     final color = progress >= 1.0
