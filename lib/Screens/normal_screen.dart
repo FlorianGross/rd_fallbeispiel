@@ -43,7 +43,10 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   List<CompletedAction> completedActions = [];
   late Timer _timer;
   late Timer _arrivalCheckTimer;
-  int _elapsedSeconds = 0;
+  /// Läuft nur, solange das Szenario nicht pausiert ist. Alle Zeiten
+  /// (Anzeige, Zeitstempel, Fahrzeug-Ankünfte) beziehen sich auf diese Uhr,
+  /// damit sie nach einer Pause konsistent bleiben.
+  final Stopwatch _clock = Stopwatch();
   bool _isPaused = false;
   late DateTime _scenarioStart;
   late final Map<String, DateTime?> _vehicleArrivalTimes;
@@ -54,6 +57,24 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   // Track which vehicles have shown arrival notification
   Set<String> _arrivedVehicles = {};
 
+  // Gleichzeitig eintreffende Fahrzeuge werden gesammelt, statt mehrere
+  // nicht wegklickbare Dialoge übereinander zu öffnen.
+  final List<String> _arrivalQueue = [];
+  bool _arrivalDialogOpen = false;
+  bool _ended = false;
+
+  int get _elapsedSeconds => _clock.elapsed.inSeconds;
+
+  /// Aktuelle Szenariozeit (ohne Pausen)
+  DateTime get _scenarioNow => _scenarioStart.add(_clock.elapsed);
+
+  void _togglePause() {
+    setState(() {
+      _isPaused = !_isPaused;
+      _isPaused ? _clock.stop() : _clock.start();
+    });
+  }
+
   String get _formattedTime {
     final m = _elapsedSeconds ~/ 60;
     final s = _elapsedSeconds % 60;
@@ -62,16 +83,10 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
 
   /// Anzahl vollständig abgehakter Schemata (nur verpflichtende + erwartete)
   int get _completedSchemaCount {
-    return schemas.keys.where((schema) {
-      return schemas[schema]!.every((action) {
-        final req = MeasureRequirements.getRequirement(schema, action);
-        if (req != null &&
-            req.getRequirementLevel(widget.userQualification) ==
-                RequirementLevel.notApplicable) return true;
-        return completedActions
-            .any((e) => e.schema == schema && e.action == action);
-      });
-    }).length;
+    return schemas.keys
+        .where((schema) => MeasureRequirements.isSchemaComplete(
+            schema, completedActions, widget.userQualification))
+        .length;
   }
 
   /// Formatierter Zeitstempel relativ zu Szenario-Start
@@ -92,7 +107,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           completedActions.add(CompletedAction(
             schema: 'Nachforderung',
             action: key,
-            timestamp: DateTime.now(),
+            timestamp: _scenarioNow,
           ));
         }
       });
@@ -105,6 +120,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
 
     // Ankunftszeiten werden ab Szenario-Start berechnet (nicht ab Setup)
     _scenarioStart = DateTime.now();
+    _clock.start();
     _vehicleArrivalTimes = {
       for (final entry in widget.vehicleArrivalMinutes.entries)
         entry.key: entry.value != null
@@ -113,11 +129,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     };
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_isPaused) {
-        setState(() {
-          _elapsedSeconds++;
-        });
-      }
+      if (!_isPaused) setState(() {});
     });
 
     // Check for vehicle arrivals every second
@@ -137,19 +149,31 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   }
 
   void _checkVehicleArrivals() {
-    final now = DateTime.now();
+    if (_isPaused) return;
+    final now = _scenarioNow;
     _vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
       if (arrivalTime != null &&
           !_arrivedVehicles.contains(vehicle) &&
           now.isAfter(arrivalTime)) {
         _arrivedVehicles.add(vehicle);
-        _showVehicleArrivalDialog(vehicle);
+        _arrivalQueue.add(vehicle);
       }
     });
+    _showNextArrival();
   }
 
-  void _showVehicleArrivalDialog(String vehicle) {
-    showDialog(
+  Future<void> _showNextArrival() async {
+    if (_arrivalDialogOpen || _arrivalQueue.isEmpty || !mounted) return;
+    final vehicles = List<String>.of(_arrivalQueue);
+    _arrivalQueue.clear();
+    _arrivalDialogOpen = true;
+    await _showVehicleArrivalDialog(vehicles);
+    _arrivalDialogOpen = false;
+    _showNextArrival();
+  }
+
+  Future<void> _showVehicleArrivalDialog(List<String> vehicles) {
+    return showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
@@ -180,15 +204,17 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          vehicle,
+                          vehicles.join(', '),
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
                             color: Colors.green.shade900,
                           ),
                         ),
-                        const Text(
-                          'ist eingetroffen!',
+                        Text(
+                          vehicles.length > 1
+                              ? 'sind eingetroffen!'
+                              : 'ist eingetroffen!',
                           style: TextStyle(fontSize: 16),
                         ),
                       ],
@@ -294,10 +320,11 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     );
   }
 
-  void _showEndScenarioDialog() {
+  /// [fromBack]: über Zurück-Taste/-Geste aufgerufen → zusätzlich „Verwerfen“
+  void _showEndScenarioDialog({bool fromBack = false}) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Row(
           children: [
             Icon(Icons.stop_circle, color: Colors.red),
@@ -305,17 +332,28 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             Text('Fallbeispiel beenden?'),
           ],
         ),
-        content: const Text(
-          'Alle Timer werden gestoppt und das Ergebnis angezeigt.',
+        content: Text(
+          fromBack
+              ? 'Das Fallbeispiel läuft noch. Beenden und auswerten (wird im '
+                  'Verlauf gespeichert) oder verwerfen?'
+              : 'Alle Timer werden gestoppt und das Ergebnis angezeigt.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Abbrechen'),
           ),
+          if (fromBack)
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _discardScenario();
+              },
+              child: const Text('Verwerfen'),
+            ),
           ElevatedButton(
             onPressed: () {
-              Navigator.of(context).pop();
+              Navigator.of(dialogContext).pop();
               _endScenario();
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -329,9 +367,21 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     );
   }
 
-  Future<void> _endScenario() async {
+  /// Verlässt das Szenario ohne Speichern (nur nach Rückfrage).
+  void _discardScenario() {
+    if (_ended) return;
+    _ended = true;
     _timer.cancel();
     _arrivalCheckTimer.cancel();
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _endScenario() async {
+    if (_ended) return;
+    _ended = true;
+    _timer.cancel();
+    _arrivalCheckTimer.cancel();
+    _clock.stop();
     final missingActions = MeasureRequirements.calculateMissingRequiredActions(
       completedActions,
       widget.userQualification,
@@ -347,6 +397,10 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       isResuscitation: false,
       completedCount: completedActions.length,
       missingCount: missingActions.length,
+      requiredCompletedCount: MeasureRequirements.countCompletedRequiredActions(
+        completedActions,
+        widget.userQualification,
+      ),
       scenarioName: widget.scenarioName,
     );
     await HistoryService.saveSession(record);
@@ -411,8 +465,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             ...incomingVehicles.map((entry) {
               final vehicle = entry.key;
               final arrivalTime = _vehicleArrivalTimes[vehicle]!;
-              final now = DateTime.now();
-              final diff = arrivalTime.difference(now);
+              final diff = arrivalTime.difference(_scenarioNow);
               final hasArrived = _arrivedVehicles.contains(vehicle);
 
               String timeText;
@@ -501,7 +554,14 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       widget.userQualification,
     );
 
-    return Scaffold(
+    return PopScope(
+      // Zurück-Taste/-Geste soll ein laufendes Fallbeispiel nicht
+      // kommentarlos verwerfen.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _showEndScenarioDialog(fromBack: true);
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(
             'Schemata – $_formattedTime (${widget.userQualification.name})'),
@@ -519,7 +579,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           IconButton(
             icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
             tooltip: _isPaused ? 'Timer fortsetzen' : 'Timer pausieren',
-            onPressed: () => setState(() => _isPaused = !_isPaused),
+            onPressed: _togglePause,
           ),
           // Alle Expand / Collapse
           IconButton(
@@ -640,14 +700,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           }).map((schema) {
             final schemaColor = getSchemaColor(schema);
             final schemaBg = getSchemaBackgroundColor(schema);
-            bool allCompleted = schemas[schema]!.every((action) {
-              final req = MeasureRequirements.getRequirement(schema, action);
-              if (req != null &&
-                  req.getRequirementLevel(widget.userQualification) ==
-                      RequirementLevel.notApplicable) return true;
-              return completedActions
-                  .any((e) => e.schema == schema && e.action == action);
-            });
+            final allCompleted = MeasureRequirements.isSchemaComplete(
+                schema, completedActions, widget.userQualification);
 
             final schemaIcon = getSchemaIcon(schema);
 
@@ -823,7 +877,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                                   completedActions.add(CompletedAction(
                                     schema: schema,
                                     action: action,
-                                    timestamp: DateTime.now(),
+                                    timestamp: _scenarioNow,
                                   ));
                                 });
                               }
@@ -858,6 +912,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 

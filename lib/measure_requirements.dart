@@ -168,6 +168,13 @@ class MeasureRequirement {
     return level == RequirementLevel.required;
   }
 
+  /// Zählt die Maßnahme für den Abschluss eines Schemas (verpflichtend oder erwartet)?
+  bool countsForSchemaCompletion(Qualification userQualification) {
+    final level = getRequirementLevel(userQualification);
+    return level == RequirementLevel.required ||
+        level == RequirementLevel.expected;
+  }
+
   /// Prüft ob die Maßnahme für diese Qualifikation optional ist
   bool isOptionalFor(Qualification userQualification) {
     final level = getRequirementLevel(userQualification);
@@ -529,7 +536,7 @@ class MeasureRequirements {
         },
       ),
       MeasureRequirement.required(schema: 'B', action: 'Atemhilfsmuskulatur'),
-      MeasureRequirement.required(schema: 'B', action: 'Sp02'),
+      MeasureRequirement.required(schema: 'B', action: 'SpO₂'),
       MeasureRequirement(
         schema: 'B',
         action: 'etCO2',
@@ -768,14 +775,62 @@ class MeasureRequirements {
     );
   }
 
-  /// Berechnet fehlende verpflichtende Maßnahmen basierend auf Qualifikation
-  static List<MissingAction> calculateMissingRequiredActions(
+  /// Schemata, die bei einer Reanimation bewertet werden. Anamnese- und
+  /// Untersuchungsschemata (SAMPLERS, OPQRST, STU, …) sind während einer
+  /// laufenden CPR nicht zu erwarten und werden daher nicht als fehlend gezählt.
+  static const Set<String> resuscitationSchemas = {
+    'SSSS',
+    'Erster Eindruck',
+    'WASB',
+    '4H',
+    'HITS',
+    'Maßnahmen',
+    'Maßnahmen (erweitert)',
+    'Übergabe (ISBAR)',
+    'Nachforderung',
+  };
+
+  /// Prüft, ob alle für die Qualifikation relevanten (verpflichtenden oder
+  /// erwarteten) Maßnahmen eines Schemas durchgeführt wurden.
+  static bool isSchemaComplete(
+    String schema,
     List<CompletedAction> completedActions,
     Qualification userQualification,
   ) {
+    final measures = requirements[schema] ?? const <MeasureRequirement>[];
+    return measures
+        .where((m) => m.countsForSchemaCompletion(userQualification))
+        .every((m) => completedActions
+            .any((e) => e.schema == schema && e.action == m.action));
+  }
+
+  /// Anzahl der durchgeführten Maßnahmen, die verpflichtend sind – Grundlage
+  /// für die Vollständigkeitsquote (optionale Extras zählen nicht mit).
+  static int countCompletedRequiredActions(
+    List<CompletedAction> completedActions,
+    Qualification userQualification, {
+    Set<String>? onlySchemas,
+  }) {
+    return completedActions.where((a) {
+      if (onlySchemas != null && !onlySchemas.contains(a.schema)) return false;
+      final measures = requirements[a.schema];
+      if (measures == null) return false;
+      final req = measures.where((m) => m.action == a.action);
+      return req.isNotEmpty && req.first.shouldCountAsMissing(userQualification);
+    }).length;
+  }
+
+  /// Berechnet fehlende verpflichtende Maßnahmen basierend auf Qualifikation.
+  /// Mit [onlySchemas] wird die Bewertung auf diese Schemata beschränkt.
+  static List<MissingAction> calculateMissingRequiredActions(
+    List<CompletedAction> completedActions,
+    Qualification userQualification, {
+    Set<String>? onlySchemas,
+  }) {
     List<MissingAction> missingRequired = [];
 
     requirements.forEach((schema, measures) {
+      if (onlySchemas != null && !onlySchemas.contains(schema)) return;
       for (var measure in measures) {
         // Prüfe ob die Maßnahme durchgeführt wurde
         bool isCompleted = completedActions.any(

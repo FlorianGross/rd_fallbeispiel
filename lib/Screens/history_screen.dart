@@ -173,6 +173,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ...List.generate(_sessions.length, (i) {
           final s = _sessions[i];
           return _SessionCard(
+            // Key nötig, damit State (Notizfeld) nach Löschen beim richtigen
+            // Eintrag bleibt und Notizen nicht der falschen Sitzung zugeordnet werden.
+            key: ValueKey(s.id),
             session: s,
             onDelete: () => _deleteSession(s.id),
             onNotesChanged: (notes) async {
@@ -206,6 +209,7 @@ class _SessionCard extends StatefulWidget {
   final Future<void> Function(String notes) onNotesChanged;
 
   const _SessionCard({
+    super.key,
     required this.session,
     required this.onDelete,
     required this.onNotesChanged,
@@ -407,8 +411,13 @@ class _SessionCardState extends State<_SessionCard> {
                     ? null
                     : () async {
                         setState(() => _savingNotes = true);
-                        await widget.onNotesChanged(_notesCtrl.text);
-                        if (mounted) setState(() => _savingNotes = false);
+                        try {
+                          await widget.onNotesChanged(_notesCtrl.text);
+                        } catch (e) {
+                          debugPrint('Notiz speichern fehlgeschlagen: $e');
+                        } finally {
+                          if (mounted) setState(() => _savingNotes = false);
+                        }
                       },
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(

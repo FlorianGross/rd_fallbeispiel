@@ -15,6 +15,9 @@ class MeasuresOverviewScreen extends StatefulWidget {
   final String? sessionId;
   final String? scenarioName;
 
+  /// Schemata, die bewertet wurden (null = alle)
+  final Set<String>? scoredSchemas;
+
   const MeasuresOverviewScreen({
     super.key,
     required this.completedActions,
@@ -27,6 +30,7 @@ class MeasuresOverviewScreen extends StatefulWidget {
     this.resuscitationStart,
     this.sessionId,
     this.scenarioName,
+    this.scoredSchemas,
   });
 
   @override
@@ -431,11 +435,18 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
   }
 
   Widget _buildStatisticsView() {
-    // Calculate statistics
-    final totalActions = widget.completedActions.length + widget.missingActions.length;
-    final completionRate = totalActions > 0
-        ? (widget.completedActions.length / totalActions * 100)
-        : 0.0;
+    // Vollständigkeit = erledigte Pflichtmaßnahmen / alle Pflichtmaßnahmen.
+    // Optionale Extras dürfen fehlende Pflichtmaßnahmen nicht ausgleichen.
+    final requiredDone = widget.userQualification != null
+        ? MeasureRequirements.countCompletedRequiredActions(
+            widget.completedActions,
+            widget.userQualification!,
+            onlySchemas: widget.scoredSchemas,
+          )
+        : widget.completedActions.length;
+    final totalRequired = requiredDone + widget.missingActions.length;
+    final completionRate =
+        totalRequired > 0 ? (requiredDone / totalRequired * 100) : 0.0;
 
     // Count by requirement level
     int completedRequired = 0;
@@ -890,18 +901,29 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                           ? null
                           : () async {
                               setState(() => _savingNotes = true);
-                              await HistoryService.updateSessionNotes(
-                                  widget.sessionId!, _notesCtrl.text);
-                              if (mounted) {
-                                setState(() => _savingNotes = false);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Notiz gespeichert!'),
-                                    backgroundColor: Colors.green,
-                                    duration: Duration(seconds: 2),
-                                  ),
-                                );
+                              var saved = false;
+                              try {
+                                await HistoryService.updateSessionNotes(
+                                    widget.sessionId!, _notesCtrl.text);
+                                saved = true;
+                              } catch (e) {
+                                debugPrint('Notiz speichern fehlgeschlagen: $e');
+                              } finally {
+                                if (mounted) {
+                                  setState(() => _savingNotes = false);
+                                }
                               }
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(saved
+                                      ? 'Notiz gespeichert!'
+                                      : 'Notiz konnte nicht gespeichert werden'),
+                                  backgroundColor:
+                                      saved ? Colors.green : Colors.red,
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
                             },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.teal,

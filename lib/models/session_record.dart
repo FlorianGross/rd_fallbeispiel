@@ -7,6 +7,10 @@ class SessionRecord {
   final bool isChildResuscitation;
   final int completedCount;
   final int missingCount;
+
+  /// Durchgeführte verpflichtende Maßnahmen (Basis der Vollständigkeitsquote).
+  /// Bei älteren Einträgen nicht gespeichert → Fallback auf [completedCount].
+  final int? requiredCompletedCount;
   final String? scenarioName;
   final String? notes;
 
@@ -19,13 +23,15 @@ class SessionRecord {
     this.isChildResuscitation = false,
     required this.completedCount,
     required this.missingCount,
+    this.requiredCompletedCount,
     this.scenarioName,
     this.notes,
   });
 
   double get completionRate {
-    final total = completedCount + missingCount;
-    return total > 0 ? completedCount / total * 100 : 0;
+    final done = requiredCompletedCount ?? completedCount;
+    final total = done + missingCount;
+    return total > 0 ? done / total * 100 : 0;
   }
 
   String get formattedDuration {
@@ -44,6 +50,7 @@ class SessionRecord {
       isChildResuscitation: isChildResuscitation,
       completedCount: completedCount,
       missingCount: missingCount,
+      requiredCompletedCount: requiredCompletedCount,
       scenarioName: scenarioName ?? this.scenarioName,
       notes: notes ?? this.notes,
     );
@@ -58,6 +65,7 @@ class SessionRecord {
         'isChildResuscitation': isChildResuscitation,
         'completedCount': completedCount,
         'missingCount': missingCount,
+        'requiredCompletedCount': requiredCompletedCount,
         'scenarioName': scenarioName,
         'notes': notes,
       };
@@ -71,6 +79,7 @@ class SessionRecord {
         isChildResuscitation: json['isChildResuscitation'] as bool? ?? false,
         completedCount: json['completedCount'] as int,
         missingCount: json['missingCount'] as int,
+        requiredCompletedCount: json['requiredCompletedCount'] as int?,
         scenarioName: json['scenarioName'] as String?,
         notes: json['notes'] as String?,
       );

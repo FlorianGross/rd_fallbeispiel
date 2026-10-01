@@ -43,7 +43,7 @@ class PredefinedScenarios {
       icon: Icons.psychology,
       color: Colors.purple,
       clinicalPicture:
-          'Patientin (72 J.) mit plötzlicher Gesichtslähmung rechts, Armsschwäche links, '
+          'Patientin (72 J.) mit plötzlicher Gesichtslähmung rechts, Armschwäche links, '
           'verwaschener Sprache. Ereignis seit ~45 min. '
           'GCS 12, RR 180/100 mmHg, Puls 88/min, SpO₂ 96 %.',
       difficulty: 'Mittel',
@@ -141,7 +141,7 @@ class PredefinedScenarios {
       color: Colors.pink,
       clinicalPicture:
           'Kleinkind (2 J.) mit Fieber 40,2 °C. Tonisch-klonischer Krampfanfall '
-          'für ~2 min (durch Eltern beobachtet), jetzt postikal verwirrt. '
+          'für ~2 min (durch Eltern beobachtet), jetzt postiktal verwirrt. '
           'Keine Vorerkrankungen, keine Medikamente, SpO₂ 94 %.',
       difficulty: 'Schwer',
     ),

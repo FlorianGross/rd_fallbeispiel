@@ -85,7 +85,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     }
 
     final now = DateTime.now();
-    resuscitationStart ??= now;
+    _markResuscitationStart(now);
 
     // Haptic feedback
     HapticFeedback.lightImpact();
@@ -115,10 +115,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   }
 
   void _registerVentilation() {
-    if (resuscitationStart == null) {
-      // Start resuscitation with first ventilation for children
-      resuscitationStart = DateTime.now();
-    }
+    // Start resuscitation with first ventilation for children
+    _markResuscitationStart(DateTime.now());
 
     // Haptic feedback
     HapticFeedback.mediumImpact();
@@ -185,18 +183,51 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   List<CompletedAction> completedActions = [];
   late Timer _timer;
   late Timer _arrivalCheckTimer;
-  int _elapsedSeconds = 0;
+  /// Läuft nur, solange nicht pausiert ist. Szenariozeit, Zeitstempel,
+  /// Fahrzeug-Ankünfte und Rhythmuskontrolle beziehen sich auf diese Uhr.
+  final Stopwatch _clock = Stopwatch();
+  late final DateTime _scenarioStart;
   bool _isPaused = false;
+  bool _ended = false;
   bool _allExpanded = false;
   DateTime? resuscitationStart;
   late final Map<String, DateTime?> _vehicleArrivalTimes;
 
   // AED / Rhythmuskontrolle
-  int _lastRhythmCheckSeconds = 0;
-  bool _rhythmCheckDue = false;
+  /// Stand der Szenario-Uhr beim Reanimationsbeginn
+  Duration? _reaniStartOffset;
+  int _lastRhythmCycle = 0;
 
   // Track which vehicles have shown arrival notification
   Set<String> _arrivedVehicles = {};
+
+  // Gleichzeitig eintreffende Fahrzeuge werden gesammelt, statt mehrere
+  // nicht wegklickbare Dialoge übereinander zu öffnen.
+  final List<String> _arrivalQueue = [];
+  bool _arrivalDialogOpen = false;
+
+  int get _elapsedSeconds => _clock.elapsed.inSeconds;
+
+  /// Aktuelle Szenariozeit (ohne Pausen)
+  DateTime get _scenarioNow => _scenarioStart.add(_clock.elapsed);
+
+  /// Reanimationsdauer auf der Szenario-Uhr (ohne Pausen)
+  Duration get _reaniElapsed => _reaniStartOffset == null
+      ? Duration.zero
+      : _clock.elapsed - _reaniStartOffset!;
+
+  void _markResuscitationStart(DateTime now) {
+    if (resuscitationStart != null) return;
+    resuscitationStart = now;
+    _reaniStartOffset = _clock.elapsed;
+  }
+
+  void _togglePause() {
+    setState(() {
+      _isPaused = !_isPaused;
+      _isPaused ? _clock.stop() : _clock.start();
+    });
+  }
 
   String get _formattedTime {
     final m = _elapsedSeconds ~/ 60;
@@ -214,7 +245,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           completedActions.add(CompletedAction(
             schema: 'Nachforderung',
             action: key,
-            timestamp: DateTime.now(),
+            timestamp: _scenarioNow,
           ));
         }
       });
@@ -226,11 +257,12 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     super.initState();
 
     // Ankunftszeiten werden ab Szenario-Start berechnet (nicht ab Setup)
-    final scenarioStart = DateTime.now();
+    _scenarioStart = DateTime.now();
+    _clock.start();
     _vehicleArrivalTimes = {
       for (final entry in widget.vehicleArrivalMinutes.entries)
         entry.key: entry.value != null
-            ? scenarioStart.add(Duration(minutes: entry.value!))
+            ? _scenarioStart.add(Duration(minutes: entry.value!))
             : null,
     };
 
@@ -240,23 +272,16 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_isPaused) return;
-      setState(() {
-        _elapsedSeconds++;
-        // AED-Rhythmuskontrolle: alle 2 min nach Reanimationsstart erinnern
-        if (resuscitationStart != null) {
-          final reaniSec =
-              DateTime.now().difference(resuscitationStart!).inSeconds;
-          if (reaniSec > 0 &&
-              reaniSec % 120 == 0 &&
-              reaniSec != _lastRhythmCheckSeconds) {
-            _lastRhythmCheckSeconds = reaniSec;
-            _rhythmCheckDue = true;
-          }
+      setState(() {});
+      // AED-Rhythmuskontrolle: alle 2 min nach Reanimationsstart erinnern.
+      // Vergleich über den 2-min-Zyklus statt `% 120 == 0`, damit ein
+      // verspäteter Timer-Tick (z. B. 119 → 121 s) keine Erinnerung verschluckt.
+      if (_reaniStartOffset != null) {
+        final cycle = _reaniElapsed.inSeconds ~/ 120;
+        if (cycle > _lastRhythmCycle) {
+          _lastRhythmCycle = cycle;
+          _showRhythmCheckReminder();
         }
-      });
-      if (_rhythmCheckDue) {
-        _rhythmCheckDue = false;
-        _showRhythmCheckReminder();
       }
     });
 
@@ -288,19 +313,31 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   }
 
   void _checkVehicleArrivals() {
-    final now = DateTime.now();
+    if (_isPaused) return;
+    final now = _scenarioNow;
     _vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
       if (arrivalTime != null &&
           !_arrivedVehicles.contains(vehicle) &&
           now.isAfter(arrivalTime)) {
         _arrivedVehicles.add(vehicle);
-        _showVehicleArrivalDialog(vehicle);
+        _arrivalQueue.add(vehicle);
       }
     });
+    _showNextArrival();
   }
 
-  void _showVehicleArrivalDialog(String vehicle) {
-    showDialog(
+  Future<void> _showNextArrival() async {
+    if (_arrivalDialogOpen || _arrivalQueue.isEmpty || !mounted) return;
+    final vehicles = List<String>.of(_arrivalQueue);
+    _arrivalQueue.clear();
+    _arrivalDialogOpen = true;
+    await _showVehicleArrivalDialog(vehicles);
+    _arrivalDialogOpen = false;
+    _showNextArrival();
+  }
+
+  Future<void> _showVehicleArrivalDialog(List<String> vehicles) {
+    return showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
@@ -322,7 +359,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                 border: Border.all(color: Colors.blue, width: 2),
               ),
               child: Text(
-                vehicle,
+                vehicles.join(', '),
+                textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
@@ -331,8 +369,10 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'ist am Einsatzort angekommen.',
+            Text(
+              vehicles.length > 1
+                  ? 'sind am Einsatzort angekommen.'
+                  : 'ist am Einsatzort angekommen.',
               style: TextStyle(fontSize: 16),
               textAlign: TextAlign.center,
             ),
@@ -578,10 +618,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     );
   }
 
-  void _showEndScenarioDialog() {
+  /// [fromBack]: über Zurück-Taste/-Geste aufgerufen → zusätzlich „Verwerfen“
+  void _showEndScenarioDialog({bool fromBack = false}) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Row(
           children: [
             Icon(Icons.stop_circle, color: Colors.red),
@@ -589,17 +630,28 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             Text('Fallbeispiel beenden?'),
           ],
         ),
-        content: const Text(
-          'Alle Timer werden gestoppt und das Ergebnis angezeigt.',
+        content: Text(
+          fromBack
+              ? 'Das Fallbeispiel läuft noch. Beenden und auswerten (wird im '
+                  'Verlauf gespeichert) oder verwerfen?'
+              : 'Alle Timer werden gestoppt und das Ergebnis angezeigt.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('Abbrechen'),
           ),
+          if (fromBack)
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                _discardScenario();
+              },
+              child: const Text('Verwerfen'),
+            ),
           ElevatedButton(
             onPressed: () {
-              Navigator.of(context).pop();
+              Navigator.of(dialogContext).pop();
               _endScenario();
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -613,27 +665,46 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     );
   }
 
-  Future<void> _endScenario() async {
+  /// Verlässt das Szenario ohne Speichern (nur nach Rückfrage).
+  void _discardScenario() {
+    if (_ended) return;
+    _ended = true;
     _timer.cancel();
     _arrivalCheckTimer.cancel();
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _endScenario() async {
+    if (_ended) return;
+    _ended = true;
+    _timer.cancel();
+    _arrivalCheckTimer.cancel();
+    _clock.stop();
+    // Bei der Reanimation werden nur CPR-relevante Schemata bewertet –
+    // SAMPLERS, OPQRST, STU usw. sind während einer CPR nicht zu erwarten.
     final missingActions = MeasureRequirements.calculateMissingRequiredActions(
       completedActions,
       widget.userQualification,
+      onlySchemas: MeasureRequirements.resuscitationSchemas,
     );
 
     // Auto-save session to history
-    final scenarioStart =
-        resuscitationStart ?? DateTime.now().subtract(Duration(seconds: _elapsedSeconds));
     final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
     final record = SessionRecord(
       id: sessionId,
-      startTime: scenarioStart,
+      // Start = Öffnen des Szenarios, passend zu durationSeconds
+      startTime: _scenarioStart,
       durationSeconds: _elapsedSeconds,
       qualification: widget.userQualification.name,
       isResuscitation: true,
       isChildResuscitation: widget.isChildResuscitation,
       completedCount: completedActions.length,
       missingCount: missingActions.length,
+      requiredCompletedCount: MeasureRequirements.countCompletedRequiredActions(
+        completedActions,
+        widget.userQualification,
+        onlySchemas: MeasureRequirements.resuscitationSchemas,
+      ),
       scenarioName: widget.scenarioName,
     );
     await HistoryService.saveSession(record);
@@ -652,6 +723,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           resuscitationStart: resuscitationStart,
           sessionId: sessionId,
           scenarioName: widget.scenarioName,
+          scoredSchemas: MeasureRequirements.resuscitationSchemas,
         ),
       ),
     );
@@ -826,7 +898,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                     const Icon(Icons.timer, size: 20, color: Colors.amber),
                     const SizedBox(width: 8),
                     Text(
-                      'Reanimation seit: ${DateTime.now().difference(resuscitationStart!).inMinutes}:${(DateTime.now().difference(resuscitationStart!).inSeconds % 60).toString().padLeft(2, '0')} min',
+                      'Reanimation seit: ${_reaniElapsed.inMinutes}:${(_reaniElapsed.inSeconds % 60).toString().padLeft(2, '0')} min',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -924,8 +996,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             ...incomingVehicles.map((entry) {
               final vehicle = entry.key;
               final arrivalTime = _vehicleArrivalTimes[vehicle]!;
-              final now = DateTime.now();
-              final diff = arrivalTime.difference(now);
+              final diff = arrivalTime.difference(_scenarioNow);
               final hasArrived = _arrivedVehicles.contains(vehicle);
 
               String timeText;
@@ -1008,7 +1079,14 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      // Zurück-Taste/-Geste soll eine laufende Reanimation nicht
+      // kommentarlos verwerfen.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _showEndScenarioDialog(fromBack: true);
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text('Reanimation – $_formattedTime (${widget.userQualification.name})'),
         flexibleSpace: Container(
@@ -1025,7 +1103,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           IconButton(
             icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
             tooltip: _isPaused ? 'Timer fortsetzen' : 'Timer pausieren',
-            onPressed: () => setState(() => _isPaused = !_isPaused),
+            onPressed: _togglePause,
           ),
           // Alle Expand / Collapse
           IconButton(
@@ -1058,6 +1136,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   final missingActions = MeasureRequirements.calculateMissingRequiredActions(
                     completedActions,
                     widget.userQualification,
+                    onlySchemas: MeasureRequirements.resuscitationSchemas,
                   );
                   return MeasuresOverviewScreen(
                     completedActions: completedActions,
@@ -1068,6 +1147,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                     compressionCount: _compressionCount,
                     ventilationCount: _ventilationCount,
                     resuscitationStart: resuscitationStart,
+                    scoredSchemas: MeasureRequirements.resuscitationSchemas,
                   );
                 }),
               );
@@ -1118,14 +1198,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           ...schemas.keys.map((schema) {
             final schemaColor = getSchemaColor(schema);
             final schemaBg = getSchemaBackgroundColor(schema);
-            bool allCompleted = schemas[schema]!.every((action) {
-              final req = MeasureRequirements.getRequirement(schema, action);
-              if (req != null &&
-                  req.getRequirementLevel(widget.userQualification) ==
-                      RequirementLevel.notApplicable) return true;
-              return completedActions
-                  .any((e) => e.schema == schema && e.action == action);
-            });
+            final allCompleted = MeasureRequirements.isSchemaComplete(
+                schema, completedActions, widget.userQualification);
 
             final schemaIcon = getSchemaIcon(schema);
 
@@ -1286,7 +1360,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                                   completedActions.add(CompletedAction(
                                     schema: schema,
                                     action: action,
-                                    timestamp: DateTime.now(),
+                                    timestamp: _scenarioNow,
                                   ));
                                 });
                               }
@@ -1354,6 +1428,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    ),
     );
   }
 }
