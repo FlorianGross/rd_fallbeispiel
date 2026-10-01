@@ -4,6 +4,7 @@ import 'package:rd_fallbeispiel/Screens/resuscitation_screen.dart';
 import '../main.dart';
 import '../measure_requirements.dart';
 import '../models/scenario.dart';
+import '../utils/adaptive_colors.dart';
 import 'history_screen.dart';
 import 'normal_screen.dart';
 import 'scenario_library_screen.dart';
@@ -284,7 +285,7 @@ class _QualificationSelectionScreenState
                                   _selectedScenario!.category,
                                   style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.grey.shade600),
+                                      color: context.mutedText),
                                 ),
                               ],
                             ),
@@ -363,11 +364,11 @@ class _QualificationSelectionScreenState
                                 ],
                               )
                             : null,
-                        color: isSelected ? null : Colors.grey.shade200,
+                        color: isSelected ? null : context.trackBg,
                         borderRadius: BorderRadius.circular(15),
                         border: Border.all(
                           color: isSelected
-                              ? Colors.blue.shade800
+                              ? context.strongFg(Colors.blue)
                               : Colors.grey.shade400,
                           width: 2,
                         ),
@@ -384,7 +385,7 @@ class _QualificationSelectionScreenState
                       child: Text(
                         qualification,
                         style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.black87,
+                          color: isSelected ? Colors.white : context.onSurface,
                           fontWeight: FontWeight.bold,
                           fontSize: 18,
                         ),
@@ -436,7 +437,7 @@ class _QualificationSelectionScreenState
                                     end: Alignment.bottomRight,
                                   )
                                 : null,
-                            color: !isActive ? Colors.grey.shade300 : null,
+                            color: !isActive ? context.trackBg : null,
                             borderRadius: BorderRadius.circular(15),
                             border: Border.all(
                               color: isActive
@@ -467,7 +468,7 @@ class _QualificationSelectionScreenState
                                 size: 32,
                                 color: isActive
                                     ? Colors.white
-                                    : Colors.grey.shade600,
+                                    : context.mutedText,
                               ),
                               const SizedBox(height: 8),
                               Text(
@@ -476,7 +477,7 @@ class _QualificationSelectionScreenState
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
-                                  color: isActive ? Colors.white : Colors.black87,
+                                  color: isActive ? Colors.white : context.onSurface,
                                 ),
                               ),
                               if (isActive)
@@ -497,7 +498,7 @@ class _QualificationSelectionScreenState
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.orange.shade50,
+                      color: context.softBg(Colors.orange),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: Colors.orange.shade200),
                     ),
@@ -511,7 +512,7 @@ class _QualificationSelectionScreenState
                             'Tipp: Langes Drücken zum Ändern der Ankunftszeit',
                             style: TextStyle(
                               fontSize: 13,
-                              color: Colors.orange.shade900,
+                              color: context.strongFg(Colors.orange),
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -621,7 +622,7 @@ class _QualificationSelectionScreenState
                     Icon(Icons.play_arrow,
                         size: 28,
                         color: selectedQualification.isEmpty
-                            ? Colors.grey.shade600
+                            ? context.mutedText
                             : Colors.white),
                     const SizedBox(width: 8),
                     Text(
@@ -632,7 +633,7 @@ class _QualificationSelectionScreenState
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
                         color: selectedQualification.isEmpty
-                            ? Colors.grey.shade600
+                            ? context.mutedText
                             : Colors.white,
                       ),
                     ),
@@ -666,7 +667,7 @@ class _QualificationSelectionScreenState
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
+                    color: context.softBg(Colors.blue),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(icon, color: Colors.blue.shade700, size: 24),
@@ -688,7 +689,7 @@ class _QualificationSelectionScreenState
                           subtitle,
                           style: TextStyle(
                             fontSize: 13,
-                            color: Colors.grey.shade600,
+                            color: context.mutedText,
                           ),
                         ),
                     ],
@@ -714,10 +715,10 @@ class _QualificationSelectionScreenState
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: value ? Colors.green.shade50 : Colors.grey.shade50,
+        color: value ? context.softBg(Colors.green) : context.softBg(Colors.grey),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: value ? Colors.green.shade200 : Colors.grey.shade200,
+          color: value ? Colors.green.shade200 : context.trackBg,
           width: 2,
         ),
       ),
@@ -726,7 +727,7 @@ class _QualificationSelectionScreenState
           if (indent) const SizedBox(width: 24),
           Icon(
             icon,
-            color: value ? Colors.green.shade700 : Colors.grey.shade600,
+            color: value ? Colors.green.shade700 : context.mutedText,
             size: 28,
           ),
           const SizedBox(width: 12),
@@ -736,7 +737,7 @@ class _QualificationSelectionScreenState
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: value ? FontWeight.w600 : FontWeight.normal,
-                color: value ? Colors.green.shade900 : Colors.black87,
+                color: value ? context.strongFg(Colors.green) : context.onSurface,
               ),
             ),
           ),

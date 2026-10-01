@@ -16,6 +16,7 @@ dependencies:
   shared_preferences: ^2.4.0
   flutter_launcher_icons: ^0.14.1
   intl: ^0.20.2
+  wakelock_plus: '>=1.2.11 <2.0.0'
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true

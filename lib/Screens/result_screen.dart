@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../measure_requirements.dart';
 import '../services/history_service.dart';
 import '../utils/schema_icons.dart';
+import '../utils/adaptive_colors.dart';
 
 class MeasuresOverviewScreen extends StatefulWidget {
   final List<CompletedAction> completedActions;
@@ -144,7 +145,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
               'Noch keine Maßnahmen durchgeführt',
               style: TextStyle(
                 fontSize: 18,
-                color: Colors.grey.shade600,
+                color: context.mutedText,
               ),
             ),
           ],
@@ -183,17 +184,17 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
 
         if (isRequired) {
           borderColor = Colors.green.shade200;
-          backgroundColor = Colors.green.shade50;
+          backgroundColor = context.softBg(Colors.green);
           textColor = Colors.green.shade700;
           levelText = null; // No badge for required
         } else if (isExpected) {
           borderColor = Colors.amber.shade300;
-          backgroundColor = Colors.amber.shade50;
+          backgroundColor = context.softBg(Colors.amber);
           textColor = Colors.amber.shade700;
           levelText = 'Erwartet';
         } else {
           borderColor = Colors.blue.shade300;
-          backgroundColor = Colors.blue.shade50;
+          backgroundColor = context.softBg(Colors.blue);
           textColor = Colors.blue.shade700;
           levelText = 'Optional';
         }
@@ -242,7 +243,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 Icon(
                   getSchemaIcon(schema),
                   size: 18,
-                  color: Colors.grey.shade700,
+                  color: context.mutedText,
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -283,7 +284,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             trailing: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.grey.shade200,
+                color: context.trackBg,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -291,7 +292,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 12,
-                  color: Colors.grey.shade800,
+                  color: context.mutedText,
                 ),
               ),
             ),
@@ -324,7 +325,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 'Für Qualifikation: ${widget.userQualification!.name}',
                 style: TextStyle(
                   fontSize: 14,
-                  color: Colors.grey.shade600,
+                  color: context.mutedText,
                 ),
               ),
           ],
@@ -349,7 +350,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
         if (widget.userQualification != null)
           Card(
             margin: const EdgeInsets.only(bottom: 16),
-            color: Colors.blue.shade50,
+            color: context.softBg(Colors.blue),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
               side: BorderSide(color: Colors.blue.shade200, width: 2),
@@ -364,7 +365,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                     child: Text(
                       'Diese Liste zeigt nur verpflichtende Maßnahmen für deine Qualifikation: ${widget.userQualification!.name}',
                       style: TextStyle(
-                        color: Colors.blue.shade900,
+                        color: context.strongFg(Colors.blue),
                         fontSize: 14,
                       ),
                     ),
@@ -396,7 +397,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
-                  color: Colors.orange.shade900,
+                  color: context.strongFg(Colors.orange),
                 ),
               ),
               subtitle: Text(
@@ -410,7 +411,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 return Container(
                   margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
+                    color: context.softBg(Colors.orange),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: ListTile(
@@ -520,7 +521,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.green.shade50,
+              color: context.softBg(Colors.green),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: Colors.green.shade200),
             ),
@@ -549,7 +550,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 gradient: LinearGradient(
-                  colors: [Colors.indigo.shade50, Colors.purple.shade50],
+                  colors: [context.softBg(Colors.indigo), context.softBg(Colors.purple)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -635,7 +636,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
               gradient: LinearGradient(
-                colors: [Colors.blue.shade50, Colors.cyan.shade50],
+                colors: [context.softBg(Colors.blue), context.softBg(Colors.cyan)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -681,7 +682,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                               child: CircularProgressIndicator(
                                 value: completionRate / 100,
                                 strokeWidth: 12,
-                                backgroundColor: Colors.grey.shade300,
+                                backgroundColor: context.trackBg,
                                 valueColor: AlwaysStoppedAnimation<Color>(
                                   completionRate >= 80 ? Colors.green :
                                   completionRate >= 60 ? Colors.orange : Colors.red,
@@ -704,7 +705,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                                   'Vollständigkeit',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.grey.shade700,
+                                    color: context.mutedText,
                                   ),
                                 ),
                               ],
@@ -830,7 +831,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                               Text(
                                 '$completed/$total ($percentage%)',
                                 style: TextStyle(
-                                  color: Colors.grey.shade700,
+                                  color: context.mutedText,
                                   fontSize: 12,
                                 ),
                               ),
@@ -839,7 +840,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                           const SizedBox(height: 4),
                           LinearProgressIndicator(
                             value: completed / total,
-                            backgroundColor: Colors.grey.shade200,
+                            backgroundColor: context.trackBg,
                             valueColor: AlwaysStoppedAnimation<Color>(
                               completed == total ? Colors.green : Colors.orange,
                             ),
@@ -967,7 +968,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
           label,
           style: TextStyle(
             fontSize: 12,
-            color: Colors.grey.shade700,
+            color: context.mutedText,
           ),
         ),
       ],

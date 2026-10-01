@@ -10,6 +10,8 @@ import '../services/pdf_service.dart';
 import '../utils/schema_colors.dart';
 import '../utils/schema_descriptions.dart';
 import '../utils/schema_icons.dart';
+import '../utils/wakelock.dart';
+import '../utils/adaptive_colors.dart';
 import 'result_screen.dart';
 
 class SchemaSelectionScreen extends StatefulWidget {
@@ -121,6 +123,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     // Ankunftszeiten werden ab Szenario-Start berechnet (nicht ab Setup)
     _scenarioStart = DateTime.now();
     _clock.start();
+    setScreenAwake(true);
     _vehicleArrivalTimes = {
       for (final entry in widget.vehicleArrivalMinutes.entries)
         entry.key: entry.value != null
@@ -142,6 +145,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
 
   @override
   void dispose() {
+    setScreenAwake(false);
     _timer.cancel();
     _arrivalCheckTimer.cancel();
     _searchCtrl.dispose();
@@ -190,7 +194,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: context.softBg(Colors.green),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.green.shade200, width: 2),
               ),
@@ -208,7 +212,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
-                            color: Colors.green.shade900,
+                            color: context.strongFg(Colors.green),
                           ),
                         ),
                         Text(
@@ -440,7 +444,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           gradient: LinearGradient(
-            colors: [Colors.orange.shade50, Colors.red.shade50],
+            colors: [context.softBg(Colors.orange), context.softBg(Colors.red)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -492,7 +496,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: context.surface,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: statusColor,
@@ -521,7 +525,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                                 'Erwartet um ${arrivalTime.hour.toString().padLeft(2, '0')}:${arrivalTime.minute.toString().padLeft(2, '0')} Uhr',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: Colors.grey.shade600,
+                                  color: context.mutedText,
                                 ),
                               ),
                           ],
@@ -826,7 +830,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                           style: TextStyle(
                             fontSize: 13,
                             color: isCompleted
-                                ? Colors.green.shade800
+                                ? context.strongFg(Colors.green)
                                 : (!canPerform
                                     ? Colors.grey.shade500
                                     : null),
@@ -953,7 +957,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             child: LinearProgressIndicator(
               value: progress,
               minHeight: 8,
-              backgroundColor: Colors.grey.shade300,
+              backgroundColor: context.trackBg,
               valueColor: AlwaysStoppedAnimation<Color>(color),
             ),
           ),

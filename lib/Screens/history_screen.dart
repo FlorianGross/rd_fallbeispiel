@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../models/session_record.dart';
 import '../services/history_service.dart';
+import '../utils/adaptive_colors.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -109,7 +110,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           const SizedBox(height: 16),
           Text(
             'Noch keine Trainings gespeichert',
-            style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 18, color: context.mutedText),
           ),
           const SizedBox(height: 8),
           Text(
@@ -143,7 +144,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
               gradient: LinearGradient(
-                colors: [Colors.indigo.shade50, Colors.blue.shade50],
+                colors: [context.softBg(Colors.indigo), context.softBg(Colors.blue)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -197,7 +198,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             style: TextStyle(
                 fontSize: 20, fontWeight: FontWeight.bold, color: color)),
         Text(label,
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+            style: TextStyle(fontSize: 11, color: context.mutedText)),
       ],
     );
   }
@@ -269,8 +270,8 @@ class _SessionCardState extends State<_SessionCard> {
                     height: 48,
                     decoration: BoxDecoration(
                       color: s.isResuscitation
-                          ? Colors.red.shade50
-                          : Colors.blue.shade50,
+                          ? context.softBg(Colors.red)
+                          : context.softBg(Colors.blue),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
@@ -301,7 +302,7 @@ class _SessionCardState extends State<_SessionCard> {
                         Text(
                           '$dateStr  •  ${s.qualification}  •  ${s.formattedDuration}',
                           style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade600),
+                              fontSize: 12, color: context.mutedText),
                         ),
                         if (s.notes != null && s.notes!.isNotEmpty) ...[
                           const SizedBox(height: 4),
@@ -309,7 +310,7 @@ class _SessionCardState extends State<_SessionCard> {
                             s.notes!,
                             style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey.shade700,
+                                color: context.mutedText,
                                 fontStyle: FontStyle.italic),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -354,7 +355,7 @@ class _SessionCardState extends State<_SessionCard> {
       decoration: BoxDecoration(
         borderRadius:
             const BorderRadius.vertical(bottom: Radius.circular(14)),
-        color: Colors.grey.shade50,
+        color: context.softBg(Colors.grey),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -444,7 +445,7 @@ class _SessionCardState extends State<_SessionCard> {
                 color: color)),
         Text(label,
             style:
-                TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                TextStyle(fontSize: 11, color: context.mutedText)),
       ],
     );
   }

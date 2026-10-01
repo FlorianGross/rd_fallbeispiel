@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'Screens/setup_screen.dart';
 
@@ -6,8 +7,27 @@ import 'Screens/setup_screen.dart';
 final ValueNotifier<ThemeMode> themeModeNotifier =
     ValueNotifier(ThemeMode.light);
 
-void main() {
+const String _themeModeKey = 'theme_mode';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await _restoreThemeMode();
   runApp(const PatientCareApp());
+}
+
+/// Lädt den zuletzt gewählten Hell/Dunkel-Modus und speichert jede Änderung.
+Future<void> _restoreThemeMode() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getString(_themeModeKey) == ThemeMode.dark.name) {
+      themeModeNotifier.value = ThemeMode.dark;
+    }
+    themeModeNotifier.addListener(() {
+      prefs.setString(_themeModeKey, themeModeNotifier.value.name);
+    });
+  } catch (e) {
+    debugPrint('Theme-Einstellung nicht verfügbar: $e');
+  }
 }
 
 class PatientCareApp extends StatelessWidget {

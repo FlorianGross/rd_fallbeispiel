@@ -12,6 +12,8 @@ import '../services/pdf_service.dart';
 import '../utils/schema_colors.dart';
 import '../utils/schema_descriptions.dart';
 import '../utils/schema_icons.dart';
+import '../utils/wakelock.dart';
+import '../utils/adaptive_colors.dart';
 
 class ResuscitationScreen extends StatefulWidget {
   final Map<String, VehicleStatus> vehicleStatus;
@@ -46,6 +48,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   // BPM Functionality
   final List<DateTime> _tapTimestamps = [];
   double _smoothedBPM = 0;
+
+  /// Längere Lücke zwischen zwei Kompressionen = Unterbrechung (Beatmung,
+  /// Rhythmusanalyse, Helferwechsel). Die Frequenz wird dann neu gemessen,
+  /// statt die Pause als langsame Kompression zu werten.
+  static const Duration _maxCompressionGap = Duration(milliseconds: 2000);
 
   // BPM History tracking for graph
   List<Map<String, dynamic>> _bpmHistory = [];
@@ -91,6 +98,10 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     HapticFeedback.lightImpact();
 
     setState(() {
+      if (_tapTimestamps.isNotEmpty &&
+          now.difference(_tapTimestamps.last) > _maxCompressionGap) {
+        _resetBpmMeasurement();
+      }
       _tapTimestamps.add(now);
       if (_tapTimestamps.length > 5) {
         _tapTimestamps.removeAt(0);
@@ -125,6 +136,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
     setState(() {
       _ventilationCount++;
+      // Beatmungspause nicht in die Kompressionsfrequenz einrechnen
+      _resetBpmMeasurement();
 
       // Record ventilation history for graph
       _ventilationHistory.add({
@@ -145,6 +158,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
       // Trigger ventilation animation
       _ventilationController.forward(from: 0);
     });
+  }
+
+  void _resetBpmMeasurement() {
+    _tapTimestamps.clear();
+    _smoothedBPM = 0;
   }
 
   void _calculateSmoothedBPM() {
@@ -259,6 +277,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     // Ankunftszeiten werden ab Szenario-Start berechnet (nicht ab Setup)
     _scenarioStart = DateTime.now();
     _clock.start();
+    setScreenAwake(true);
     _vehicleArrivalTimes = {
       for (final entry in widget.vehicleArrivalMinutes.entries)
         entry.key: entry.value != null
@@ -272,7 +291,15 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_isPaused) return;
-      setState(() {});
+      setState(() {
+        // Ohne weitere Kompressionen soll keine veraltete (grüne) Frequenz
+        // stehen bleiben.
+        if (_tapTimestamps.isNotEmpty &&
+            DateTime.now().difference(_tapTimestamps.last) >
+                _maxCompressionGap) {
+          _resetBpmMeasurement();
+        }
+      });
       // AED-Rhythmuskontrolle: alle 2 min nach Reanimationsstart erinnern.
       // Vergleich über den 2-min-Zyklus statt `% 120 == 0`, damit ein
       // verspäteter Timer-Tick (z. B. 119 → 121 s) keine Erinnerung verschluckt.
@@ -354,7 +381,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
+                color: context.softBg(Colors.blue),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.blue, width: 2),
               ),
@@ -397,6 +424,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
   @override
   void dispose() {
+    setScreenAwake(false);
     _timer.cancel();
     _arrivalCheckTimer.cancel();
     _pulseController.dispose();
@@ -738,7 +766,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           gradient: LinearGradient(
-            colors: [Colors.red.shade50, Colors.blue.shade50],
+            colors: [context.softBg(Colors.red), context.softBg(Colors.blue)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -752,7 +780,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                 margin: const EdgeInsets.only(bottom: 16),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.orange.shade100,
+                  color: context.softBg(Colors.orange),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Colors.orange, width: 2),
                 ),
@@ -812,7 +840,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                       'BPM (Ziel: 100-120)',
                       style: TextStyle(
                         fontSize: 14,
-                        color: Colors.grey.shade700,
+                        color: context.mutedText,
                       ),
                     ),
                   ],
@@ -867,7 +895,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   const SizedBox(height: 6),
                   LinearProgressIndicator(
                     value: _cycleCompressions / _targetCompressionRatio,
-                    backgroundColor: Colors.grey.shade300,
+                    backgroundColor: context.trackBg,
                     valueColor: AlwaysStoppedAnimation<Color>(
                       _cycleCompressions >= _targetCompressionRatio
                           ? Colors.orange
@@ -878,7 +906,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   const SizedBox(height: 4),
                   Text(
                     'Verhältnis: $_targetCompressionRatio:$_targetVentilationRatio ${_targetCompressionRatio == 10 && _targetVentilationRatio == 1 ? "(Asynchron - Intubiert)" : widget.isChildResuscitation ? "(Kind)" : "(Erwachsener)"}',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    style: TextStyle(fontSize: 12, color: context.mutedText),
                   ),
                 ],
               ),
@@ -889,7 +917,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.amber.shade100,
+                  color: context.softBg(Colors.amber),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -942,7 +970,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             label,
             style: TextStyle(
               fontSize: 12,
-              color: Colors.grey.shade700,
+              color: context.mutedText,
             ),
           ),
         ],
@@ -971,7 +999,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           gradient: LinearGradient(
-            colors: [Colors.orange.shade50, Colors.red.shade50],
+            colors: [context.softBg(Colors.orange), context.softBg(Colors.red)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -1023,7 +1051,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: context.surface,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: statusColor,
@@ -1052,7 +1080,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                                 'Erwartet um ${arrivalTime.hour.toString().padLeft(2, '0')}:${arrivalTime.minute.toString().padLeft(2, '0')} Uhr',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: Colors.grey.shade600,
+                                  color: context.mutedText,
                                 ),
                               ),
                           ],
@@ -1321,7 +1349,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                           style: TextStyle(
                             fontSize: 13,
                             color: isCompleted
-                                ? Colors.green.shade800
+                                ? context.strongFg(Colors.green)
                                 : (!canPerform ? Colors.grey.shade500 : null),
                             fontWeight: isCompleted
                                 ? FontWeight.w500
