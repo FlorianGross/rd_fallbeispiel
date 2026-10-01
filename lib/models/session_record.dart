@@ -1,4 +1,5 @@
 import '../measure_requirements.dart';
+import 'cpr_summary.dart';
 
 class SessionRecord {
   final String id;
@@ -24,6 +25,9 @@ class SessionRecord {
   /// Bewertete Schemata (null = alle)
   final List<String>? scoredSchemas;
 
+  /// Kennzahlen der Reanimation (nur bei Reanimations-Sitzungen)
+  final CprSummary? cpr;
+
   const SessionRecord({
     required this.id,
     required this.startTime,
@@ -39,6 +43,7 @@ class SessionRecord {
     this.completedActions,
     this.missingActions,
     this.scoredSchemas,
+    this.cpr,
   });
 
   /// Sind die Maßnahmenlisten gespeichert (Einträge ab dieser Version)?
@@ -72,6 +77,7 @@ class SessionRecord {
       completedActions: completedActions,
       missingActions: missingActions,
       scoredSchemas: scoredSchemas,
+      cpr: cpr,
     );
   }
 
@@ -105,6 +111,7 @@ class SessionRecord {
                   })
               .toList(),
         if (scoredSchemas != null) 'scoredSchemas': scoredSchemas,
+        if (cpr != null) 'cpr': cpr!.toJson(),
       };
 
   factory SessionRecord.fromJson(Map<String, dynamic> json) => SessionRecord(
@@ -142,5 +149,8 @@ class SessionRecord {
         scoredSchemas: (json['scoredSchemas'] as List<dynamic>?)
             ?.map((e) => e as String)
             .toList(),
+        cpr: json['cpr'] == null
+            ? null
+            : CprSummary.fromJson(json['cpr'] as Map<String, dynamic>),
       );
 }

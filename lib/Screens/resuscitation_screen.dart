@@ -6,6 +6,7 @@ import 'package:rd_fallbeispiel/Screens/result_screen.dart';
 
 import '../main.dart';
 import '../measure_requirements.dart';
+import '../models/cpr_summary.dart';
 import '../models/scenario.dart';
 import '../models/session_record.dart';
 import '../services/history_service.dart';
@@ -740,6 +741,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
       completedActions: List.of(completedActions),
       missingActions: missingActions,
       scoredSchemas: MeasureRequirements.resuscitationSchemas.toList(),
+      cpr: CprSummary.fromHistory(
+        compressions: _compressionCount,
+        ventilations: _ventilationCount,
+        bpmHistory: _bpmHistory,
+      ),
     );
     await HistoryService.saveSession(record);
 

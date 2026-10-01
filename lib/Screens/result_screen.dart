@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../measure_requirements.dart';
+import '../models/cpr_summary.dart';
 import '../services/history_service.dart';
 import '../services/pdf_service.dart';
 import '../utils/schema_icons.dart';
 import '../utils/adaptive_colors.dart';
+import '../widgets/bpm_chart.dart';
 
 class MeasuresOverviewScreen extends StatefulWidget {
   final List<CompletedAction> completedActions;
@@ -29,6 +31,10 @@ class MeasuresOverviewScreen extends StatefulWidget {
   /// Szenariodauer für den PDF-Bericht
   final int? durationSeconds;
 
+  /// Gespeicherte Reanimations-Kennzahlen (beim Öffnen aus dem Verlauf, wo
+  /// der Frequenzverlauf selbst nicht mehr vorliegt)
+  final CprSummary? cprSummary;
+
   const MeasuresOverviewScreen({
     super.key,
     required this.completedActions,
@@ -45,6 +51,7 @@ class MeasuresOverviewScreen extends StatefulWidget {
     this.initialNotes,
     this.fromHistory = false,
     this.durationSeconds,
+    this.cprSummary,
   });
 
   @override
@@ -584,6 +591,8 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             ),
           ),
 
+        if (_cprSummary case final cpr?) _buildCprCard(cpr),
+
         // Qualification Info Card
         if (widget.userQualification != null)
           Card(
@@ -985,6 +994,137 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  CprSummary? get _cprSummary =>
+      widget.cprSummary ??
+      (widget.compressionCount == null
+          ? null
+          : CprSummary.fromHistory(
+              compressions: widget.compressionCount!,
+              ventilations: widget.ventilationCount ?? 0,
+              bpmHistory: widget.bpmHistory ?? const [],
+            ));
+
+  /// Kennzahlen + Frequenzverlauf der Reanimation
+  Widget _buildCprCard(CprSummary cpr) {
+    final share = cpr.targetShare;
+    // Status immer mit Symbol + Text, nie nur über die Farbe
+    final (IconData statusIcon, Color statusColor, String statusText) =
+        switch (share) {
+      null => (Icons.help_outline, context.mutedText, 'keine Messung'),
+      >= 0.8 => (Icons.check_circle, Colors.green, 'gut'),
+      >= 0.5 => (Icons.warning_amber, Colors.orange, 'mäßig'),
+      _ => (Icons.error_outline, Colors.red, 'niedrig'),
+    };
+    final showChart = (widget.bpmHistory?.isNotEmpty ?? false) &&
+        widget.resuscitationStart != null;
+
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.monitor_heart, color: Colors.red),
+                const SizedBox(width: 8),
+                Text(
+                  'Reanimation',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 2.2,
+              children: [
+                _cprTile('${cpr.compressions}', 'Kompressionen'),
+                _cprTile('${cpr.ventilations}', 'Beatmungen'),
+                _cprTile(
+                  cpr.averageBpm > 0
+                      ? '${cpr.averageBpm.toStringAsFixed(0)}/min'
+                      : '–',
+                  'Ø Frequenz',
+                ),
+                _cprTile(
+                  share == null ? '–' : '${(share * 100).toStringAsFixed(0)} %',
+                  'im Zielbereich',
+                  status: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(statusIcon, size: 14, color: statusColor),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(statusText,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                TextStyle(fontSize: 11, color: statusColor)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (showChart) ...[
+              const SizedBox(height: 16),
+              BpmChart(
+                bpmHistory: widget.bpmHistory!,
+                ventilationHistory: widget.ventilationHistory ?? const [],
+                start: widget.resuscitationStart!,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _cprTile(String value, String label, {Widget? status}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: context.softBg(Colors.grey),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Row(
+            children: [
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: context.onSurface,
+                ),
+              ),
+              if (status != null) ...[
+                const SizedBox(width: 8),
+                Flexible(child: status),
+              ],
+            ],
+          ),
+          Text(label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: context.mutedText)),
+        ],
+      ),
     );
   }
 
