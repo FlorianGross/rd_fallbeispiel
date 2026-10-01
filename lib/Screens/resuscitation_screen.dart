@@ -437,6 +437,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     final missingActions = MeasureRequirements.calculateMissingRequiredActions(
       completedActions,
       widget.userQualification,
+      onlySchemas: MeasureRequirements.resuscitationSchemas,
     );
     await PdfService.generateResuscitationPdf(
       completedActions: completedActions,
@@ -448,10 +449,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
       targetCompressionRatio: _targetCompressionRatio,
       targetVentilationRatio: _targetVentilationRatio,
       resuscitationStart: resuscitationStart,
-      bpm: _bpm,
+      resuscitationDuration: _reaniElapsed,
       bpmHistory: _bpmHistory,
       ventilationHistory: _ventilationHistory,
       vehicleStatus: widget.vehicleStatus,
+      scenarioName: widget.scenario?.name,
     );
   }
 
@@ -756,6 +758,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           sessionId: sessionId,
           scenarioName: widget.scenario?.name,
           scoredSchemas: MeasureRequirements.resuscitationSchemas,
+          durationSeconds: _elapsedSeconds,
         ),
       ),
     );

@@ -279,6 +279,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
       missingActions: missingActions,
       userQualification: widget.userQualification,
       elapsedSeconds: _elapsedSeconds,
+      scenarioName: widget.scenario?.name,
     );
   }
 
@@ -446,6 +447,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           sessionId: sessionId,
           scenarioName: widget.scenario?.name,
           scoredSchemas: _scoredSchemas,
+          durationSeconds: _elapsedSeconds,
         ),
       ),
     );

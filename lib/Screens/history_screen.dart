@@ -48,6 +48,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           scenarioName: s.scenarioName,
           scoredSchemas: s.scoredSchemas?.toSet(),
           initialNotes: s.notes,
+          durationSeconds: s.durationSeconds,
           fromHistory: true,
         ),
       ),

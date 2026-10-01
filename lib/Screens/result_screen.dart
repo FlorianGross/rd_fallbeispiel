@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../measure_requirements.dart';
 import '../services/history_service.dart';
+import '../services/pdf_service.dart';
 import '../utils/schema_icons.dart';
 import '../utils/adaptive_colors.dart';
 
@@ -25,6 +26,9 @@ class MeasuresOverviewScreen extends StatefulWidget {
   /// Aus dem Verlauf geöffnet (kein „automatisch gespeichert“-Hinweis)
   final bool fromHistory;
 
+  /// Szenariodauer für den PDF-Bericht
+  final int? durationSeconds;
+
   const MeasuresOverviewScreen({
     super.key,
     required this.completedActions,
@@ -40,6 +44,7 @@ class MeasuresOverviewScreen extends StatefulWidget {
     this.scoredSchemas,
     this.initialNotes,
     this.fromHistory = false,
+    this.durationSeconds,
   });
 
   @override
@@ -58,6 +63,30 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
       firstTimeStamp = widget.completedActions.first.timestamp;
     }
     _notesCtrl = TextEditingController(text: widget.initialNotes ?? '');
+  }
+
+  /// Bericht inkl. Szenario und aktueller Notiz – auch für Einträge aus dem
+  /// Verlauf.
+  Future<void> _exportPdf() async {
+    try {
+      await PdfService.generateNormalPdf(
+        completedActions: widget.completedActions,
+        missingActions: widget.missingActions,
+        userQualification: widget.userQualification!,
+        elapsedSeconds: widget.durationSeconds ?? 0,
+        scenarioName: widget.scenarioName,
+        notes: _notesCtrl.text,
+      );
+    } catch (e) {
+      debugPrint('PDF-Export fehlgeschlagen: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('PDF konnte nicht erstellt werden'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -87,6 +116,14 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                   ? 'Maßnahmen Übersicht (${widget.userQualification!.name})'
                   : 'Maßnahmen Übersicht'
           ),
+          actions: [
+            if (widget.userQualification != null)
+              IconButton(
+                icon: const Icon(Icons.picture_as_pdf),
+                tooltip: 'Als PDF exportieren / teilen',
+                onPressed: _exportPdf,
+              ),
+          ],
           flexibleSpace: Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
