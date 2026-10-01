@@ -19,6 +19,12 @@ class MeasuresOverviewScreen extends StatefulWidget {
   /// Schemata, die bewertet wurden (null = alle)
   final Set<String>? scoredSchemas;
 
+  /// Bereits gespeicherte Notiz (beim Öffnen aus dem Verlauf)
+  final String? initialNotes;
+
+  /// Aus dem Verlauf geöffnet (kein „automatisch gespeichert“-Hinweis)
+  final bool fromHistory;
+
   const MeasuresOverviewScreen({
     super.key,
     required this.completedActions,
@@ -32,6 +38,8 @@ class MeasuresOverviewScreen extends StatefulWidget {
     this.sessionId,
     this.scenarioName,
     this.scoredSchemas,
+    this.initialNotes,
+    this.fromHistory = false,
   });
 
   @override
@@ -49,7 +57,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
     if (widget.completedActions.isNotEmpty) {
       firstTimeStamp = widget.completedActions.first.timestamp;
     }
-    _notesCtrl = TextEditingController();
+    _notesCtrl = TextEditingController(text: widget.initialNotes ?? '');
   }
 
   @override
@@ -516,7 +524,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         // Sitzung gespeichert Banner
-        if (widget.sessionId != null)
+        if (widget.sessionId != null && !widget.fromHistory)
           Container(
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),

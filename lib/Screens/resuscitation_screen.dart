@@ -735,6 +735,9 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         onlySchemas: MeasureRequirements.resuscitationSchemas,
       ),
       scenarioName: widget.scenario?.name,
+      completedActions: List.of(completedActions),
+      missingActions: missingActions,
+      scoredSchemas: MeasureRequirements.resuscitationSchemas.toList(),
     );
     await HistoryService.saveSession(record);
 

@@ -430,6 +430,9 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
         onlySchemas: _scoredSchemas,
       ),
       scenarioName: widget.scenario?.name,
+      completedActions: List.of(completedActions),
+      missingActions: missingActions,
+      scoredSchemas: _scoredSchemas?.toList(),
     );
     await HistoryService.saveSession(record);
 

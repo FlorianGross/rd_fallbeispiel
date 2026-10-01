@@ -1,3 +1,5 @@
+import '../measure_requirements.dart';
+
 class SessionRecord {
   final String id;
   final DateTime startTime;
@@ -14,6 +16,14 @@ class SessionRecord {
   final String? scenarioName;
   final String? notes;
 
+  /// Vollständige Maßnahmenlisten der Sitzung, damit sie im Verlauf wieder
+  /// geöffnet und ausgewertet werden kann. Bei älteren Einträgen null.
+  final List<CompletedAction>? completedActions;
+  final List<MissingAction>? missingActions;
+
+  /// Bewertete Schemata (null = alle)
+  final List<String>? scoredSchemas;
+
   const SessionRecord({
     required this.id,
     required this.startTime,
@@ -26,7 +36,13 @@ class SessionRecord {
     this.requiredCompletedCount,
     this.scenarioName,
     this.notes,
+    this.completedActions,
+    this.missingActions,
+    this.scoredSchemas,
   });
+
+  /// Sind die Maßnahmenlisten gespeichert (Einträge ab dieser Version)?
+  bool get hasDetails => completedActions != null && missingActions != null;
 
   double get completionRate {
     final done = requiredCompletedCount ?? completedCount;
@@ -53,6 +69,9 @@ class SessionRecord {
       requiredCompletedCount: requiredCompletedCount,
       scenarioName: scenarioName ?? this.scenarioName,
       notes: notes ?? this.notes,
+      completedActions: completedActions,
+      missingActions: missingActions,
+      scoredSchemas: scoredSchemas,
     );
   }
 
@@ -68,6 +87,24 @@ class SessionRecord {
         'requiredCompletedCount': requiredCompletedCount,
         'scenarioName': scenarioName,
         'notes': notes,
+        if (completedActions != null)
+          'completedActions': completedActions!
+              .map((a) => {
+                    'schema': a.schema,
+                    'action': a.action,
+                    'timestamp': a.timestamp.toIso8601String(),
+                  })
+              .toList(),
+        if (missingActions != null)
+          'missingActions': missingActions!
+              .map((m) => {
+                    'schema': m.schema,
+                    'action': m.action,
+                    'level': m.requirementLevel.name,
+                    'note': m.note,
+                  })
+              .toList(),
+        if (scoredSchemas != null) 'scoredSchemas': scoredSchemas,
       };
 
   factory SessionRecord.fromJson(Map<String, dynamic> json) => SessionRecord(
@@ -82,5 +119,28 @@ class SessionRecord {
         requiredCompletedCount: json['requiredCompletedCount'] as int?,
         scenarioName: json['scenarioName'] as String?,
         notes: json['notes'] as String?,
+        completedActions: (json['completedActions'] as List<dynamic>?)
+            ?.map((e) => e as Map<String, dynamic>)
+            .map((e) => CompletedAction(
+                  schema: e['schema'] as String,
+                  action: e['action'] as String,
+                  timestamp: DateTime.parse(e['timestamp'] as String),
+                ))
+            .toList(),
+        missingActions: (json['missingActions'] as List<dynamic>?)
+            ?.map((e) => e as Map<String, dynamic>)
+            .map((e) => MissingAction(
+                  schema: e['schema'] as String,
+                  action: e['action'] as String,
+                  requirementLevel: RequirementLevel.values.firstWhere(
+                    (l) => l.name == e['level'],
+                    orElse: () => RequirementLevel.required,
+                  ),
+                  note: e['note'] as String?,
+                ))
+            .toList(),
+        scoredSchemas: (json['scoredSchemas'] as List<dynamic>?)
+            ?.map((e) => e as String)
+            .toList(),
       );
 }

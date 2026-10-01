@@ -179,6 +179,43 @@ void main() {
       expect(restored.completionRate, closeTo(66.7, 0.1));
     });
 
+    test('JSON-Roundtrip mit Maßnahmenlisten', () {
+      final r = SessionRecord(
+        id: '2',
+        startTime: DateTime(2026, 10, 1, 12),
+        durationSeconds: 60,
+        qualification: 'RS',
+        isResuscitation: false,
+        completedCount: 1,
+        missingCount: 1,
+        completedActions: [_done('SSSS', 'Scene')],
+        missingActions: const [
+          MissingAction(
+            schema: 'D',
+            action: 'BZ',
+            requirementLevel: RequirementLevel.required,
+          ),
+        ],
+        scoredSchemas: const ['SSSS', 'D'],
+      );
+      final restored =
+          SessionRecord.fromJson(json.decode(json.encode(r.toJson())));
+      expect(restored.hasDetails, isTrue);
+      expect(restored.completedActions!.single.action, 'Scene');
+      expect(restored.completedActions!.single.timestamp, DateTime(2026));
+      expect(restored.missingActions!.single.action, 'BZ');
+      expect(restored.missingActions!.single.requirementLevel,
+          RequirementLevel.required);
+      expect(restored.scoredSchemas, ['SSSS', 'D']);
+      // Notiz ändern darf die Details nicht verlieren
+      expect(restored.copyWith(notes: 'x').hasDetails, isTrue);
+    });
+
+    test('alte Einträge ohne Maßnahmenlisten', () {
+      final restored = SessionRecord.fromJson(record().toJson());
+      expect(restored.hasDetails, isFalse);
+    });
+
     test('JSON-Roundtrip', () {
       final restored = SessionRecord.fromJson(record(requiredDone: 3).toJson());
       expect(restored.requiredCompletedCount, 3);
