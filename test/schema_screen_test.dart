@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rd_fallbeispiel/Screens/normal_screen.dart';
+import 'package:rd_fallbeispiel/Screens/resuscitation_screen.dart';
 import 'package:rd_fallbeispiel/measure_requirements.dart';
 import 'package:rd_fallbeispiel/models/scenario.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -84,5 +85,49 @@ void main() {
     expect(find.text('Nicht bewertet in diesem Szenario'), findsWidgets);
 
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Reanimation: Zeitstempel, Markierung und Zurück-Schutz',
+      (tester) async {
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => ElevatedButton(
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => const ResuscitationScreen(
+              vehicleStatus: {},
+              vehicleArrivalMinutes: {},
+              isChildResuscitation: false,
+              userQualification: Qualification.RS,
+            ),
+          )),
+          child: const Text('Start'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Start'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('SSSS'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Scene'));
+    await tester.pump();
+    expect(find.text('+00:00'), findsOneWidget);
+    await tester.scrollUntilVisible(
+        find.text('SAMPLERS'), 300,
+        scrollable: find
+            .descendant(
+                of: find.byType(ListView), matching: find.byType(Scrollable))
+            .first);
+    expect(find.text('Nicht bewertet bei der Reanimation'), findsWidgets);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(ResuscitationScreen), findsOneWidget);
+    await tester.tap(find.text('Verwerfen'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ResuscitationScreen), findsNothing);
   });
 }
