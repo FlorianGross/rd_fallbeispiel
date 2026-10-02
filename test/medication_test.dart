@@ -128,6 +128,16 @@ void main() {
       expect(notes, contains('Amiodaron: 1× – erste Gabe nach 3 Schocks'));
     });
 
+    test('SAN/RH: nur der Schock-Hinweis, keine Medikamenten-Hinweise', () {
+      final notes = resuscitationMedicationNotes(
+        medications: const [],
+        shockTimes: [at(10), at(20), at(30)],
+        resuscitationStart: start,
+        medicationsAllowed: false,
+      );
+      expect(notes, ['Schocks: 3']);
+    });
+
     test('fehlendes Amiodaron ab 3 Schocks wird erwähnt', () {
       final notes = resuscitationMedicationNotes(
         medications: const [],
@@ -142,6 +152,10 @@ void main() {
   group('Reanimations-Screen', () {
     testWidgets('Schock zählt mit und hakt Defibrillation einmal ab',
         (tester) async {
+      // Smartphone hochkant (Standardgröße im Test wäre Querformat)
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
       await tester.pumpWidget(_resus(Qualification.SAN));
       await tester.pump();
       await tester.tap(find.text('Schock'));
@@ -156,6 +170,10 @@ void main() {
     });
 
     testWidgets('Adrenalin per Schnellzugriff dokumentieren', (tester) async {
+      // Smartphone hochkant (Standardgröße im Test wäre Querformat)
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
       await tester.pumpWidget(_resus(Qualification.NFS));
       await tester.pump();
       await tester.tap(find.text('Adrenalin'));

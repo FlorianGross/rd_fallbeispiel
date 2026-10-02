@@ -5,6 +5,7 @@ import 'package:printing/printing.dart';
 
 import '../measure_requirements.dart';
 import '../models/medication.dart';
+import '../models/resuscitation_notes.dart';
 
 class PdfService {
   /// Erzeugt und öffnet den Trainingsbericht für den normalen Einsatzmodus
@@ -283,7 +284,7 @@ class PdfService {
               ),
             ],
 
-            ..._buildMedicationSection(medications, medicationNotes),
+            ..._buildMedicationSection(medications, medicationNotes, firstTimeStamp),
             ..._buildNotesSection(notes),
 
             // Footer
@@ -728,7 +729,8 @@ class PdfService {
               ),
             ],
 
-            ..._buildMedicationSection(medications, medicationNotes),
+            ..._buildMedicationSection(
+                medications, medicationNotes, firstActionTime),
             ..._buildNotesSection(notes),
 
             // Footer
@@ -785,17 +787,16 @@ class PdfService {
     );
   }
 
-  /// Medikamentengaben als Tabelle (Uhrzeit, Wirkstoff, Dosis, Weg) und
-  /// die beschreibenden Reanimations-Hinweise
+  /// Medikamentengaben als Tabelle (Zeit relativ zu [t0] wie im übrigen
+  /// Protokoll, Wirkstoff, Dosis, Weg) und die Reanimations-Hinweise
   static List<pw.Widget> _buildMedicationSection(
     List<MedicationAdministration> medications,
     List<String> medicationNotes,
+    DateTime t0,
   ) {
     if (medications.isEmpty && medicationNotes.isEmpty) return const [];
     final meds = List<MedicationAdministration>.of(medications)
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    String clock(DateTime t) =>
-        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:${t.second.toString().padLeft(2, '0')}';
     return [
       pw.SizedBox(height: 20),
       pw.Container(
@@ -816,11 +817,11 @@ class PdfService {
             pw.SizedBox(height: 8),
             if (meds.isNotEmpty)
               pw.TableHelper.fromTextArray(
-                headers: ['Uhrzeit', 'Wirkstoff', 'Dosis', 'Weg'],
+                headers: ['Zeit', 'Wirkstoff', 'Dosis', 'Weg'],
                 data: [
                   for (final m in meds)
                     [
-                      clock(m.timestamp),
+                      '+${formatOffset(m.timestamp.difference(t0))}',
                       m.medication.label,
                       m.dose,
                       m.route,

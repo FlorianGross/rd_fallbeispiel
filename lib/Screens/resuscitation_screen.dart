@@ -327,6 +327,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         medications: medications,
         shockTimes: _shockTimes,
         resuscitationStart: resuscitationStart,
+        medicationsAllowed:
+            canDocumentMedication(widget.userQualification),
       ),
     );
   }
@@ -586,36 +588,40 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Im kompakten Panel kurze Beschriftungen ohne Symbol, damit alle
+          // drei Tasten in eine Zeile passen.
           Wrap(
-            spacing: 8,
+            spacing: compact ? 4 : 8,
             runSpacing: 8,
             alignment: WrapAlignment.center,
             children: [
-              OutlinedButton.icon(
+              _cprActionButton(
+                label: shocks == 0 ? 'Schock' : 'Schock ($shocks)',
+                icon: Icons.bolt,
+                compact: compact,
+                color: context.strongFg(Colors.amber),
                 onPressed: _registerShock,
-                icon: const Icon(Icons.bolt),
-                label: Text(shocks == 0 ? 'Schock' : 'Schock ($shocks)'),
-                style: OutlinedButton.styleFrom(
-                    foregroundColor: context.strongFg(Colors.amber)),
               ),
               if (canMeds) ...[
-                OutlinedButton.icon(
+                _cprActionButton(
+                  label: compact ? 'Adren.' : 'Adrenalin',
+                  icon: Icons.vaccines,
+                  compact: compact,
                   onPressed: () => addMedication(
                     completedActions,
                     preset: MedicationCatalog.adrenalin,
                     presetRoute: 'i.v.',
                   ),
-                  icon: const Icon(Icons.vaccines),
-                  label: const Text('Adrenalin'),
                 ),
-                OutlinedButton.icon(
+                _cprActionButton(
+                  label: compact ? 'Amio' : 'Amiodaron',
+                  icon: Icons.vaccines,
+                  compact: compact,
                   onPressed: () => addMedication(
                     completedActions,
                     preset: MedicationCatalog.amiodaron,
                     presetRoute: 'i.v.',
                   ),
-                  icon: const Icon(Icons.vaccines),
-                  label: const Text('Amiodaron'),
                 ),
               ],
             ],
@@ -641,6 +647,28 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         ],
       ),
     );
+  }
+
+  Widget _cprActionButton({
+    required String label,
+    required IconData icon,
+    required bool compact,
+    required VoidCallback onPressed,
+    Color? color,
+  }) {
+    final style = OutlinedButton.styleFrom(
+      foregroundColor: color,
+      visualDensity: compact ? VisualDensity.compact : null,
+      padding: compact ? const EdgeInsets.symmetric(horizontal: 10) : null,
+    );
+    return compact
+        ? OutlinedButton(onPressed: onPressed, style: style, child: Text(label))
+        : OutlinedButton.icon(
+            onPressed: onPressed,
+            style: style,
+            icon: Icon(icon),
+            label: Text(label),
+          );
   }
 
   Widget _buildReanimationDashboard() {

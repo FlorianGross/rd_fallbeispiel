@@ -611,8 +611,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
 
         if (_cprSummary case final cpr?) _buildCprCard(cpr),
 
-        if (widget.medications.isNotEmpty || _cprSummary != null)
-          _buildMedicationCard(),
+        if (_showMedicationCard) _buildMedicationCard(),
 
         // Qualification Info Card
         if (widget.userQualification != null)
@@ -1039,8 +1038,18 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
       medications: widget.medications,
       shockTimes: cpr.shockTimes ?? const [],
       resuscitationStart: cpr.startedAt ?? widget.resuscitationStart,
+      medicationsAllowed: _medicationsAllowed,
     );
   }
+
+  bool get _medicationsAllowed =>
+      widget.userQualification == null ||
+      MeasureRequirements.canDocumentMedication(widget.userQualification!);
+
+  /// Medikamenten-Karte nur, wenn es etwas zu zeigen gibt – nicht bei
+  /// älteren Verlaufseinträgen aus der Zeit vor dem Medikamenten-Protokoll.
+  bool get _showMedicationCard =>
+      widget.medications.isNotEmpty || _medicationNotes.isNotEmpty;
 
   /// Gegebene Medikamente (Zeit relativ zur ersten Maßnahme) und bei der
   /// Reanimation die Hinweise zu Adrenalin/Amiodaron/Schocks
@@ -1073,7 +1082,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            if (meds.isEmpty)
+            if (meds.isEmpty && _medicationsAllowed)
               Text('Keine Medikamente dokumentiert',
                   style: TextStyle(color: context.mutedText)),
             for (final m in meds)

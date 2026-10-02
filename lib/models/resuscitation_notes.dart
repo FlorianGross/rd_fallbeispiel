@@ -6,10 +6,14 @@ import 'medication.dart';
 /// Bewusst keine Bewertung: Der Herzrhythmus wird nicht erfasst, daher lässt
 /// sich nicht entscheiden, wann Adrenalin oder Amiodaron fällig gewesen wäre.
 /// Die Hinweise sollen die Nachbesprechung erleichtern.
+///
+/// Ohne [medicationsAllowed] (SAN/RH) gibt es nur den Schock-Hinweis – ein
+/// „Kein Adrenalin dokumentiert“ wäre dort irreführend.
 List<String> resuscitationMedicationNotes({
   required List<MedicationAdministration> medications,
   required List<DateTime> shockTimes,
   required DateTime? resuscitationStart,
+  bool medicationsAllowed = true,
 }) {
   if (resuscitationStart == null) return const [];
   final notes = <String>[];
@@ -27,6 +31,7 @@ List<String> resuscitationMedicationNotes({
   final shocks = List<DateTime>.of(shockTimes)..sort();
 
   notes.add('Schocks: ${shocks.length}');
+  if (!medicationsAllowed) return notes;
 
   if (adrenalin.isEmpty) {
     notes.add('Kein Adrenalin dokumentiert');

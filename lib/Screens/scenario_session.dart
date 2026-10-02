@@ -90,14 +90,8 @@ mixin ScenarioSessionMixin<T extends StatefulWidget> on State<T> {
   /// Dokumentierte Medikamentengaben
   final List<MedicationAdministration> medications = [];
 
-  /// Medikamente dokumentieren darf, wer „Medikamentengabe“ durchführen kann
-  /// (RS, NFS). Für SAN/RH wäre die automatisch abgehakte Maßnahme sonst als
-  /// „nicht zulässig“ in der Auswertung.
   bool canDocumentMedication(Qualification qualification) =>
-      MeasureRequirements.getRequirement(
-              'Maßnahmen (erweitert)', 'Medikamentengabe')
-          ?.canPerformWithQualification(qualification) ??
-      false;
+      MeasureRequirements.canDocumentMedication(qualification);
 
   /// Öffnet den Medikamenten-Dialog und protokolliert die Gabe. Die erste
   /// Gabe hakt „Medikamentengabe“ automatisch ab.
