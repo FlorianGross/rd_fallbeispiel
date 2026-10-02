@@ -5,6 +5,7 @@ import '../main.dart';
 import '../measure_requirements.dart';
 import '../models/scenario.dart';
 import '../utils/adaptive_colors.dart';
+import '../widgets/responsive.dart';
 import 'history_screen.dart';
 import 'normal_screen.dart';
 import 'scenario_library_screen.dart';
@@ -246,9 +247,9 @@ class _QualificationSelectionScreenState
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
+      body: ResponsiveCenter(
         child: ListView(
+          padding: const EdgeInsets.all(16.0),
           children: [
             // Szenario-Bibliothek Section
             _buildSectionCard(

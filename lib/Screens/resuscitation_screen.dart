@@ -12,6 +12,7 @@ import '../models/session_record.dart';
 import '../services/history_service.dart';
 import '../services/pdf_service.dart';
 import '../utils/adaptive_colors.dart';
+import '../widgets/responsive.dart';
 import '../widgets/scenario_common.dart';
 import 'scenario_session.dart';
 
@@ -619,17 +620,22 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildStatCard(
-                  icon: Icons.compress,
-                  label: 'Kompressionen',
-                  value: '$_compressionCount',
-                  color: Colors.red,
+                Flexible(
+                  child: _buildStatCard(
+                    icon: Icons.compress,
+                    label: 'Kompressionen',
+                    value: '$_compressionCount',
+                    color: Colors.red,
+                  ),
                 ),
-                _buildStatCard(
-                  icon: Icons.air,
-                  label: 'Beatmungen',
-                  value: '$_ventilationCount',
-                  color: Colors.blue,
+                const SizedBox(width: 8),
+                Flexible(
+                  child: _buildStatCard(
+                    icon: Icons.air,
+                    label: 'Beatmungen',
+                    value: '$_ventilationCount',
+                    color: Colors.blue,
+                  ),
                 ),
               ],
             ),
@@ -643,9 +649,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Bis zur Beatmung: ${_targetCompressionRatio - _cycleCompressions} Kompressionen',
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                      Flexible(
+                        child: Text(
+                          'Bis zur Beatmung: ${_targetCompressionRatio - _cycleCompressions} Kompressionen',
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                        ),
                       ),
                       IconButton(
                         icon: const Icon(Icons.edit, size: 20),
@@ -689,11 +697,13 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   children: [
                     const Icon(Icons.timer, size: 20, color: Colors.amber),
                     const SizedBox(width: 8),
-                    Text(
-                      'Reanimation seit: ${_reaniElapsed.inMinutes}:${(_reaniElapsed.inSeconds % 60).toString().padLeft(2, '0')} min',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                    Flexible(
+                      child: Text(
+                        'Reanimation seit: ${_reaniElapsed.inMinutes}:${(_reaniElapsed.inSeconds % 60).toString().padLeft(2, '0')} min',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],
@@ -742,8 +752,192 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     );
   }
 
+  static const double _cprPanelWidth = 380;
+
+  /// Pause-Banner und ankommende Rettungsmittel über der Schema-Liste.
+  List<Widget> _buildStatusSection() {
+    return [
+      if (isPaused)
+        Container(
+          width: double.infinity,
+          color: Colors.amber.shade700,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.pause_circle, color: Colors.white, size: 18),
+              SizedBox(width: 8),
+              Text('Timer pausiert',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+      VehicleArrivalCard(
+        vehicleStatus: widget.vehicleStatus,
+        arrivalTimes: vehicleArrivalTimes,
+        arrivedVehicles: arrivedVehicles,
+        now: scenarioNow,
+      ),
+    ];
+  }
+
+  /// Schema-Karten, CPR-relevante (bewertete) Schemata zuerst.
+  List<Widget> _buildSchemaCards() {
+    final ordered = [
+      ...schemas.keys.where(_isScored),
+      ...schemas.keys.where((s) => !_isScored(s)),
+    ];
+    return ordered
+        .map((schema) => SchemaCard(
+              schema: schema,
+              actions: schemas[schema]!,
+              completedActions: completedActions,
+              qualification: widget.userQualification,
+              expanded: _allExpanded,
+              unscoredHint: _isScored(schema)
+                  ? null
+                  : 'Nicht bewertet bei der Reanimation',
+              formatTimestamp: relativeTime,
+              onComplete: (action) => setState(() {
+                completedActions.add(CompletedAction(
+                  schema: schema,
+                  action: action,
+                  timestamp: scenarioNow,
+                ));
+              }),
+              onUndo: (action) => setState(() {
+                completedActions.removeWhere(
+                    (e) => e.schema == schema && e.action == action);
+              }),
+            ))
+        .toList();
+  }
+
+  /// Beatmungs-Taste. Im CPR-Bedienfeld ([inPanel]) als breite Taste über
+  /// die volle Panelbreite, sonst als schwebender Button.
+  Widget _buildVentilationButton({bool inPanel = false}) {
+    final label = widget.isChildResuscitation && !_initialVentilationsComplete
+        ? 'Initial $_initialVentilationCount/$_requiredInitialVentilations'
+        : (_cycleCompressions >= _targetCompressionRatio
+            ? 'Beatmung!'
+            : 'Beatmung');
+    final color = widget.isChildResuscitation && !_initialVentilationsComplete
+        ? Colors.orange
+        : (_cycleCompressions >= _targetCompressionRatio
+            ? Colors.orange
+            : Colors.blue);
+    // Im Panel ohne Puls-Skalierung: Die breite Taste würde sonst über den
+    // Panelrand hinauswachsen.
+    if (inPanel) {
+      return SizedBox(
+        height: 72,
+        child: FilledButton.icon(
+          onPressed: _registerVentilation,
+          style: FilledButton.styleFrom(
+            backgroundColor: color,
+            foregroundColor: Colors.white,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+          icon: const Icon(Icons.air, size: 32),
+          label: Text(label,
+              style:
+                  const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        ),
+      );
+    }
+    return ScaleTransition(
+      scale: _ventilationAnimation,
+      child: FloatingActionButton.extended(
+        heroTag: 'ventilation',
+        onPressed: _registerVentilation,
+        icon: const Icon(Icons.air, size: 32),
+        label: Text(label,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        backgroundColor: color,
+      ),
+    );
+  }
+
+  /// Kompressions-Taste (Frequenzmessung per Antippen). Im CPR-Bedienfeld
+  /// ([inPanel]) als große Fläche, damit sie im Takt sicher getroffen wird.
+  Widget _buildCompressionButton({bool inPanel = false}) {
+    if (inPanel) {
+      return SizedBox(
+        height: 160,
+        child: FilledButton(
+          onPressed: _registerTap,
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          ),
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.favorite, size: 64),
+              SizedBox(height: 4),
+              Text('Kompression',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+      );
+    }
+    return ScaleTransition(
+      scale: _pulseAnimation,
+      child: FloatingActionButton.large(
+        heroTag: 'compression',
+        onPressed: _registerTap,
+        backgroundColor: Colors.red,
+        child: const Icon(Icons.favorite, size: 48),
+      ),
+    );
+  }
+
+  /// Festes CPR-Bedienfeld rechts im breiten Layout (Tablet quer): oben die
+  /// Kennzahlen, unten große Tasten für Kompression und Beatmung.
+  Widget _buildCprPanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: ListView(
+            children: [
+              if (resuscitationStart != null)
+                _buildReanimationDashboard()
+              else
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'Mit der ersten Kompression startet die Reanimation.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: context.mutedText),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildVentilationButton(inPanel: true),
+              const SizedBox(height: 24),
+              _buildCompressionButton(inPanel: true),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final wide = isWideLayout(context);
     return PopScope(
       // Zurück-Taste/-Geste soll eine laufende Reanimation nicht
       // kommentarlos verwerfen.
@@ -842,100 +1036,48 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           ),
         ],
       ),
-      body: ListView(
-        children: [
-          if (resuscitationStart != null) _buildReanimationDashboard(),
-
-          // Pause-Banner
-          if (isPaused)
-            Container(
-              width: double.infinity,
-              color: Colors.amber.shade700,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.pause_circle, color: Colors.white, size: 18),
-                  SizedBox(width: 8),
-                  Text('Timer pausiert',
-                      style: TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.bold)),
-                ],
-              ),
+      body: wide
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: ListView(
+                    children: [
+                      ..._buildStatusSection(),
+                      ColumnFlow(
+                        // Rechts sitzt das CPR-Bedienfeld, daher eine Spalte
+                        // weniger als im Normalmodus.
+                        columns: schemaColumnCount(
+                                MediaQuery.sizeOf(context).width) -
+                            1,
+                        children: _buildSchemaCards(),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
+                const VerticalDivider(width: 1),
+                SizedBox(width: _cprPanelWidth, child: _buildCprPanel()),
+              ],
+            )
+          : ListView(
+              children: [
+                if (resuscitationStart != null) _buildReanimationDashboard(),
+                ..._buildStatusSection(),
+                ..._buildSchemaCards(),
+                const SizedBox(height: 100), // Space for FABs
+              ],
             ),
-
-          // Vehicle arrival status
-          VehicleArrivalCard(
-            vehicleStatus: widget.vehicleStatus,
-            arrivalTimes: vehicleArrivalTimes,
-            arrivedVehicles: arrivedVehicles,
-            now: scenarioNow,
-          ),
-
-          // CPR-relevante (bewertete) Schemata zuerst
-          ...[
-            ...schemas.keys.where(_isScored),
-            ...schemas.keys.where((s) => !_isScored(s)),
-          ].map((schema) => SchemaCard(
-                schema: schema,
-                actions: schemas[schema]!,
-                completedActions: completedActions,
-                qualification: widget.userQualification,
-                expanded: _allExpanded,
-                unscoredHint: _isScored(schema)
-                    ? null
-                    : 'Nicht bewertet bei der Reanimation',
-                formatTimestamp: relativeTime,
-                onComplete: (action) => setState(() {
-                  completedActions.add(CompletedAction(
-                    schema: schema,
-                    action: action,
-                    timestamp: scenarioNow,
-                  ));
-                }),
-                onUndo: (action) => setState(() {
-                  completedActions.removeWhere(
-                      (e) => e.schema == schema && e.action == action);
-                }),
-              )),
-          const SizedBox(height: 100), // Space for FABs
-        ],
-      ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          // Ventilation Button
-          ScaleTransition(
-            scale: _ventilationAnimation,
-            child: FloatingActionButton.extended(
-              heroTag: 'ventilation',
-              onPressed: _registerVentilation,
-              icon: const Icon(Icons.air, size: 32),
-              label: Text(
-                widget.isChildResuscitation && !_initialVentilationsComplete
-                    ? 'Initial ${_initialVentilationCount}/$_requiredInitialVentilations'
-                    : (_cycleCompressions >= _targetCompressionRatio ? 'Beatmung!' : 'Beatmung'),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              backgroundColor: widget.isChildResuscitation && !_initialVentilationsComplete
-                  ? Colors.orange
-                  : (_cycleCompressions >= _targetCompressionRatio ? Colors.orange : Colors.blue),
+      floatingActionButton: wide
+          ? null
+          : Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                _buildVentilationButton(),
+                const SizedBox(height: 16),
+                _buildCompressionButton(),
+              ],
             ),
-          ),
-          const SizedBox(height: 16),
-
-          // Compression Button
-          ScaleTransition(
-            scale: _pulseAnimation,
-            child: FloatingActionButton.large(
-              heroTag: 'compression',
-              onPressed: _registerTap,
-              backgroundColor: Colors.red,
-              child: const Icon(Icons.favorite, size: 48),
-            ),
-          ),
-        ],
-      ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     ),
     );

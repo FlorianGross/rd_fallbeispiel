@@ -5,6 +5,7 @@ import '../measure_requirements.dart';
 import '../models/session_record.dart';
 import '../services/history_service.dart';
 import '../utils/adaptive_colors.dart';
+import '../widgets/responsive.dart';
 import 'result_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -123,7 +124,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ? const Center(child: CircularProgressIndicator())
           : _sessions.isEmpty
               ? _buildEmptyState()
-              : _buildContent(),
+              : ResponsiveCenter(child: _buildContent()),
     );
   }
 

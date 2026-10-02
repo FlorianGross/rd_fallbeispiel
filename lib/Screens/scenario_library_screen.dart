@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/scenario.dart';
 import '../utils/adaptive_colors.dart';
+import '../widgets/responsive.dart';
 
 class ScenarioLibraryScreen extends StatefulWidget {
   const ScenarioLibraryScreen({super.key});
@@ -64,7 +65,8 @@ class _ScenarioLibraryScreenState extends State<ScenarioLibraryScreen> {
           ),
         ),
       ),
-      body: Column(
+      body: ResponsiveCenter(
+        child: Column(
         children: [
           // Search bar
           Padding(
@@ -125,6 +127,7 @@ class _ScenarioLibraryScreenState extends State<ScenarioLibraryScreen> {
                   ),
           ),
         ],
+      ),
       ),
     );
   }

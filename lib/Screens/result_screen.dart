@@ -6,6 +6,7 @@ import '../services/pdf_service.dart';
 import '../utils/schema_icons.dart';
 import '../utils/adaptive_colors.dart';
 import '../widgets/bpm_chart.dart';
+import '../widgets/responsive.dart';
 
 class MeasuresOverviewScreen extends StatefulWidget {
   final List<CompletedAction> completedActions;
@@ -171,15 +172,20 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             ],
           ),
         ),
-        body: TabBarView(
-          children: [
-            // Completed Actions Tab
-            _buildCompletedActionsView(),
-            // Missing Actions Tab
-            _buildMissingActionsView(),
-            // Statistics Tab
-            _buildStatisticsView(),
-          ],
+        body: ResponsiveCenter(
+          // Die Auswertung enthält Diagramme – etwas mehr Breite als bei
+          // reinen Formularen.
+          maxWidth: 900,
+          child: TabBarView(
+            children: [
+              // Completed Actions Tab
+              _buildCompletedActionsView(),
+              // Missing Actions Tab
+              _buildMissingActionsView(),
+              // Statistics Tab
+              _buildStatisticsView(),
+            ],
+          ),
         ),
       ),
     );

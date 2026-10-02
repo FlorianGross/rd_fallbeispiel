@@ -9,6 +9,7 @@ import '../models/session_record.dart';
 import '../services/history_service.dart';
 import '../services/pdf_service.dart';
 import '../utils/adaptive_colors.dart';
+import '../widgets/responsive.dart';
 import '../widgets/scenario_common.dart';
 import 'result_screen.dart';
 import 'scenario_session.dart';
@@ -342,7 +343,9 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen>
             now: scenarioNow,
           ),
 
-          ..._orderedSchemas.where((schema) {
+          ColumnFlow(
+            columns: schemaColumnCount(MediaQuery.sizeOf(context).width),
+            children: _orderedSchemas.where((schema) {
             if (_searchQuery.isEmpty) return true;
             final q = _searchQuery.toLowerCase();
             return schema.toLowerCase().contains(q) ||
@@ -369,7 +372,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen>
                   completedActions.removeWhere(
                       (e) => e.schema == schema && e.action == action);
                 }),
-              )),
+              )).toList(),
+          ),
               const SizedBox(height: 20), // Bottom padding
             ],
           ),
