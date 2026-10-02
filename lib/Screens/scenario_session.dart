@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../measure_requirements.dart';
+import '../models/medication.dart';
 import '../utils/wakelock.dart';
+import '../widgets/medication_widgets.dart';
 import '../widgets/scenario_common.dart';
 
 /// Gemeinsamer Ablauf eines laufenden Fallbeispiels (Normal und Reanimation):
@@ -83,6 +85,51 @@ mixin ScenarioSessionMixin<T extends StatefulWidget> on State<T> {
         }
       });
     });
+  }
+
+  /// Dokumentierte Medikamentengaben
+  final List<MedicationAdministration> medications = [];
+
+  /// Medikamente dokumentieren darf, wer „Medikamentengabe“ durchführen kann
+  /// (RS, NFS). Für SAN/RH wäre die automatisch abgehakte Maßnahme sonst als
+  /// „nicht zulässig“ in der Auswertung.
+  bool canDocumentMedication(Qualification qualification) =>
+      MeasureRequirements.getRequirement(
+              'Maßnahmen (erweitert)', 'Medikamentengabe')
+          ?.canPerformWithQualification(qualification) ??
+      false;
+
+  /// Öffnet den Medikamenten-Dialog und protokolliert die Gabe. Die erste
+  /// Gabe hakt „Medikamentengabe“ automatisch ab.
+  Future<MedicationAdministration?> addMedication(
+    List<CompletedAction> completedActions, {
+    Medication? preset,
+    String? presetRoute,
+  }) async {
+    final administration = await showMedicationDialog(
+      context,
+      now: () => scenarioNow,
+      preset: preset,
+      presetRoute: presetRoute,
+    );
+    if (administration == null || !mounted) return null;
+    setState(() {
+      medications.add(administration);
+      if (!completedActions.any((e) =>
+          e.schema == 'Maßnahmen (erweitert)' &&
+          e.action == 'Medikamentengabe')) {
+        completedActions.add(CompletedAction(
+          schema: 'Maßnahmen (erweitert)',
+          action: 'Medikamentengabe',
+          timestamp: administration.timestamp,
+        ));
+      }
+    });
+    return administration;
+  }
+
+  void removeMedication(MedicationAdministration administration) {
+    setState(() => medications.remove(administration));
   }
 
   /// Regelmäßig aufrufen: meldet Fahrzeuge, deren Ankunftszeit erreicht ist.

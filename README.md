@@ -15,6 +15,13 @@ Pflichtmaßnahmen für die gewählte Qualifikation gefehlt haben.
   die zum Szenario passenden situativen Schemata.
 - **Reanimationsmodus** mit Frequenzmessung per Antippen, Beatmungszähler
   (30:2 bzw. 15:2 beim Kind), 2-Minuten-Rhythmuskontrolle und Frequenzverlauf.
+- **Medikamenten-Protokoll** (ab RS) mit Katalog nach Bestückungsliste
+  „Rucksack Kreislauf Modul 1“: Wirkstoff, Dosis (Freitext), Applikationsweg und
+  Zeitpunkt. In der Reanimation zusätzlich Schock-Zähler, Schnellzugriff auf
+  Adrenalin/Amiodaron, Zeit seit dem letzten Adrenalin und Hinweise für die
+  Nachbesprechung. Trainingswerkzeug, keine Dosierhilfe: Dosen werden weder
+  vorgeschlagen noch berechnet, und der Katalog ist regional anzupassen
+  (`lib/models/medication.dart`).
 - **Nachalarmierte Fahrzeuge** (KTW, RTW, NEF, RTH) mit Ankunftszeit.
 - **Auswertung, Verlauf und PDF-Bericht** inkl. „Häufig vergessen“ und Notizen.
 

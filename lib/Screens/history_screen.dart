@@ -51,6 +51,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           initialNotes: s.notes,
           durationSeconds: s.durationSeconds,
           cprSummary: s.cpr,
+          medications: s.medications ?? const [],
           fromHistory: true,
         ),
       ),
