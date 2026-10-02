@@ -168,6 +168,13 @@ class MeasureRequirement {
     return level == RequirementLevel.required;
   }
 
+  /// Zählt die Maßnahme für den Abschluss eines Schemas (verpflichtend oder erwartet)?
+  bool countsForSchemaCompletion(Qualification userQualification) {
+    final level = getRequirementLevel(userQualification);
+    return level == RequirementLevel.required ||
+        level == RequirementLevel.expected;
+  }
+
   /// Prüft ob die Maßnahme für diese Qualifikation optional ist
   bool isOptionalFor(Qualification userQualification) {
     final level = getRequirementLevel(userQualification);
@@ -529,7 +536,7 @@ class MeasureRequirements {
         },
       ),
       MeasureRequirement.required(schema: 'B', action: 'Atemhilfsmuskulatur'),
-      MeasureRequirement.required(schema: 'B', action: 'Sp02'),
+      MeasureRequirement.required(schema: 'B', action: 'SpO₂'),
       MeasureRequirement(
         schema: 'B',
         action: 'etCO2',
@@ -768,14 +775,133 @@ class MeasureRequirements {
     );
   }
 
-  /// Berechnet fehlende verpflichtende Maßnahmen basierend auf Qualifikation
-  static List<MissingAction> calculateMissingRequiredActions(
+  /// Schemata, die bei jedem Fallbeispiel (ohne Reanimation) bewertet werden.
+  /// Situative Schemata (STU, BE-FAST, ZOPS, OPQRST) kommen je nach Szenario
+  /// über [PredefinedScenario.extraSchemas] hinzu.
+  static const Set<String> baseSchemas = {
+    'SSSS',
+    'Erster Eindruck',
+    'WASB',
+    'c/x',
+    'a',
+    'b',
+    'c',
+    'A',
+    'B',
+    'C',
+    'D',
+    'E',
+    'SAMPLERS',
+    '4H',
+    'HITS',
+    'Maßnahmen',
+    'Maßnahmen (erweitert)',
+    'Übergabe (ISBAR)',
+    'Nachforderung',
+  };
+
+  /// Schemata, die bei einer Reanimation bewertet werden. Anamnese- und
+  /// Untersuchungsschemata (SAMPLERS, OPQRST, STU, …) sind während einer
+  /// laufenden CPR nicht zu erwarten und werden daher nicht als fehlend gezählt.
+  static const Set<String> resuscitationSchemas = {
+    'SSSS',
+    'Erster Eindruck',
+    'WASB',
+    '4H',
+    'HITS',
+    'Maßnahmen',
+    'Maßnahmen (erweitert)',
+    'Übergabe (ISBAR)',
+    'Nachforderung',
+  };
+
+  /// Schemata, deren Maßnahmen sich gegenseitig ausschließen: Es wird genau
+  /// eine Stufe dokumentiert (z. B. WASB – ein Patient ist entweder wach oder
+  /// bewusstlos). Das Schema gilt als erledigt, sobald eine Stufe gewählt ist;
+  /// fehlt sie, zählt das als eine fehlende Pflichtmaßnahme.
+  static const Set<String> singleChoiceSchemas = {'WASB'};
+
+  /// Bezeichnung der fehlenden Maßnahme, wenn in einem Auswahl-Schema
+  /// ([singleChoiceSchemas]) keine Stufe gewählt wurde.
+  static String singleChoiceMissingLabel(String schema) =>
+      '$schema – keine Stufe erhoben';
+
+  /// Hat das Schema für diese Qualifikation verpflichtende oder erwartete
+  /// Maßnahmen? Rein optionale Schemata zählen nicht zum Fortschritt.
+  static bool hasCountedMeasures(
+      String schema, Qualification userQualification) {
+    final measures = requirements[schema] ?? const <MeasureRequirement>[];
+    return measures.any((m) => m.countsForSchemaCompletion(userQualification));
+  }
+
+  /// Prüft, ob alle für die Qualifikation relevanten (verpflichtenden oder
+  /// erwarteten) Maßnahmen eines Schemas durchgeführt wurden. Ein rein
+  /// optionales Schema gilt erst als erledigt, wenn darin etwas getan wurde.
+  static bool isSchemaComplete(
+    String schema,
     List<CompletedAction> completedActions,
     Qualification userQualification,
   ) {
+    final measures = requirements[schema] ?? const <MeasureRequirement>[];
+    final counted =
+        measures.where((m) => m.countsForSchemaCompletion(userQualification));
+    if (counted.isEmpty || singleChoiceSchemas.contains(schema)) {
+      return completedActions.any((e) => e.schema == schema);
+    }
+    return counted.every((m) => completedActions
+        .any((e) => e.schema == schema && e.action == m.action));
+  }
+
+  /// Anzahl der durchgeführten Maßnahmen, die verpflichtend sind – Grundlage
+  /// für die Vollständigkeitsquote (optionale Extras zählen nicht mit).
+  static int countCompletedRequiredActions(
+    List<CompletedAction> completedActions,
+    Qualification userQualification, {
+    Set<String>? onlySchemas,
+  }) {
+    final countedSingleChoice = <String>{};
+    return completedActions.where((a) {
+      if (onlySchemas != null && !onlySchemas.contains(a.schema)) return false;
+      final measures = requirements[a.schema];
+      if (measures == null) return false;
+      final req = measures.where((m) => m.action == a.action);
+      if (req.isEmpty || !req.first.shouldCountAsMissing(userQualification)) {
+        return false;
+      }
+      // Auswahl-Schema zählt als eine Pflichtmaßnahme, egal wie viele Stufen
+      // angetippt wurden.
+      if (singleChoiceSchemas.contains(a.schema)) {
+        return countedSingleChoice.add(a.schema);
+      }
+      return true;
+    }).length;
+  }
+
+  /// Berechnet fehlende verpflichtende Maßnahmen basierend auf Qualifikation.
+  /// Mit [onlySchemas] wird die Bewertung auf diese Schemata beschränkt.
+  static List<MissingAction> calculateMissingRequiredActions(
+    List<CompletedAction> completedActions,
+    Qualification userQualification, {
+    Set<String>? onlySchemas,
+  }) {
     List<MissingAction> missingRequired = [];
 
     requirements.forEach((schema, measures) {
+      if (onlySchemas != null && !onlySchemas.contains(schema)) return;
+      if (singleChoiceSchemas.contains(schema)) {
+        final isRequired =
+            measures.any((m) => m.shouldCountAsMissing(userQualification));
+        final anyChosen = completedActions.any((a) => a.schema == schema);
+        if (isRequired && !anyChosen) {
+          missingRequired.add(MissingAction(
+            schema: schema,
+            action: singleChoiceMissingLabel(schema),
+            requirementLevel: RequirementLevel.required,
+            note: 'Eine Stufe auswählen',
+          ));
+        }
+        return;
+      }
       for (var measure in measures) {
         // Prüfe ob die Maßnahme durchgeführt wurde
         bool isCompleted = completedActions.any(

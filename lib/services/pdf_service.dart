@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -11,8 +12,30 @@ class PdfService {
     required List<MissingAction> missingActions,
     required Qualification userQualification,
     required int elapsedSeconds,
+    String? scenarioName,
+    String? notes,
   }) async {
-    final pdf = pw.Document();
+    final pdf = await buildNormalPdf(
+      completedActions: completedActions,
+      missingActions: missingActions,
+      userQualification: userQualification,
+      elapsedSeconds: elapsedSeconds,
+      scenarioName: scenarioName,
+      notes: notes,
+    );
+    await _output(pdf, 'Trainingsbericht', scenarioName);
+  }
+
+  /// Baut den Trainingsbericht (ohne ihn anzuzeigen)
+  static Future<pw.Document> buildNormalPdf({
+    required List<CompletedAction> completedActions,
+    required List<MissingAction> missingActions,
+    required Qualification userQualification,
+    required int elapsedSeconds,
+    String? scenarioName,
+    String? notes,
+  }) async {
+    final pdf = pw.Document(theme: await _pdfTheme());
 
     final sortedCompleted = List<CompletedAction>.from(completedActions)
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
@@ -21,80 +44,191 @@ class PdfService {
     final firstTimeStamp =
         sortedCompleted.isNotEmpty ? sortedCompleted.first.timestamp : now;
 
-    if (sortedCompleted.isNotEmpty) {
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(40),
-          build: (pw.Context context) {
-            return [
-              // Header
-              pw.Container(
-                padding: const pw.EdgeInsets.all(20),
-                decoration: pw.BoxDecoration(
-                  gradient: const pw.LinearGradient(
-                    colors: [PdfColors.red300, PdfColors.blue300],
-                  ),
-                  borderRadius:
-                      const pw.BorderRadius.all(pw.Radius.circular(10)),
+    // Auch ohne durchgeführte Maßnahmen einen Bericht erzeugen (sonst
+    // entstünde ein leeres Dokument).
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(40),
+        build: (pw.Context context) {
+          return [
+            // Header
+            pw.Container(
+              padding: const pw.EdgeInsets.all(20),
+              decoration: pw.BoxDecoration(
+                gradient: const pw.LinearGradient(
+                  colors: [PdfColors.red300, PdfColors.blue300],
                 ),
-                child: pw.Column(
-                  children: [
-                    pw.Text(
-                      'TRAININGSBERICHT PATIENTENVERSORGUNG',
-                      style: pw.TextStyle(
-                        fontSize: 20,
-                        fontWeight: pw.FontWeight.bold,
-                        color: PdfColors.white,
-                      ),
+                borderRadius:
+                    const pw.BorderRadius.all(pw.Radius.circular(10)),
+              ),
+              child: pw.Column(
+                children: [
+                  pw.Text(
+                    'TRAININGSBERICHT PATIENTENVERSORGUNG',
+                    style: pw.TextStyle(
+                      fontSize: 20,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.white,
                     ),
-                    pw.SizedBox(height: 8),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'Qualifikation: ${userQualification.name}',
+                    style: const pw.TextStyle(
+                      fontSize: 14,
+                      color: PdfColors.white,
+                    ),
+                  ),
+                  if (scenarioName != null) ...[
+                    pw.SizedBox(height: 4),
                     pw.Text(
-                      'Qualifikation: ${userQualification.name}',
+                      'Szenario: $scenarioName',
                       style: const pw.TextStyle(
                         fontSize: 14,
                         color: PdfColors.white,
                       ),
                     ),
-                    pw.SizedBox(height: 4),
-                    pw.Text(
-                      'Erstellt am: ${now.day}.${now.month}.${now.year} um ${now.hour}:${now.minute.toString().padLeft(2, '0')} Uhr',
-                      style: const pw.TextStyle(
-                        fontSize: 12,
-                        color: PdfColors.white,
-                      ),
-                    ),
                   ],
-                ),
-              ),
-              pw.SizedBox(height: 20),
-
-              // Statistics Row
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildStatBox(
-                      'Durchgeführt', '${completedActions.length}', PdfColors.green),
-                  _buildStatBox(
-                      'Fehlend', '${missingActions.length}', PdfColors.orange),
-                  _buildStatBox(
-                      'Gesamt',
-                      '${completedActions.length + missingActions.length}',
-                      PdfColors.blue),
-                  _buildStatBox(
-                      'Dauer',
-                      '${(elapsedSeconds ~/ 60).toString().padLeft(2, '0')}:${(elapsedSeconds % 60).toString().padLeft(2, '0')}',
-                      PdfColors.purple),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    'Erstellt am: ${now.day}.${now.month}.${now.year} um ${now.hour}:${now.minute.toString().padLeft(2, '0')} Uhr',
+                    style: const pw.TextStyle(
+                      fontSize: 12,
+                      color: PdfColors.white,
+                    ),
+                  ),
                 ],
               ),
-              pw.SizedBox(height: 20),
+            ),
+            pw.SizedBox(height: 20),
 
-              // Completed Actions Section
+            // Statistics Row
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildStatBox(
+                    'Durchgeführt', '${completedActions.length}', PdfColors.green),
+                _buildStatBox(
+                    'Fehlend', '${missingActions.length}', PdfColors.orange),
+                _buildStatBox(
+                    'Gesamt',
+                    '${completedActions.length + missingActions.length}',
+                    PdfColors.blue),
+                _buildStatBox(
+                    'Dauer',
+                    '${(elapsedSeconds ~/ 60).toString().padLeft(2, '0')}:${(elapsedSeconds % 60).toString().padLeft(2, '0')}',
+                    PdfColors.purple),
+              ],
+            ),
+            pw.SizedBox(height: 20),
+
+            // Completed Actions Section
+            pw.Container(
+              padding: const pw.EdgeInsets.all(15),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.green50,
+                border: pw.Border.all(color: PdfColors.green200, width: 2),
+                borderRadius:
+                    const pw.BorderRadius.all(pw.Radius.circular(8)),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    children: [
+                      pw.Container(width: 4, height: 20, color: PdfColors.green),
+                      pw.SizedBox(width: 10),
+                      pw.Text(
+                        'DURCHGEFÜHRTE MASSNAHMEN (${completedActions.length})',
+                        style: pw.TextStyle(
+                          fontSize: 16,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.green900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  pw.SizedBox(height: 10),
+                  ...sortedCompleted.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final action = entry.value;
+                    final elapsed = action.timestamp.difference(firstTimeStamp);
+                    final elapsedTime =
+                        '+${elapsed.inMinutes}:${(elapsed.inSeconds % 60).toString().padLeft(2, '0')} min';
+
+                    return pw.Container(
+                      margin: const pw.EdgeInsets.symmetric(vertical: 3),
+                      padding: const pw.EdgeInsets.all(8),
+                      decoration: pw.BoxDecoration(
+                        color: index % 2 == 0 ? PdfColors.white : PdfColors.grey100,
+                        borderRadius:
+                            const pw.BorderRadius.all(pw.Radius.circular(4)),
+                      ),
+                      child: pw.Row(
+                        children: [
+                          pw.Container(
+                            width: 25,
+                            alignment: pw.Alignment.center,
+                            child: pw.Text(
+                              '${index + 1}.',
+                              style: pw.TextStyle(
+                                fontSize: 10,
+                                fontWeight: pw.FontWeight.bold,
+                                color: PdfColors.grey700,
+                              ),
+                            ),
+                          ),
+                          pw.SizedBox(width: 10),
+                          pw.Expanded(
+                            flex: 2,
+                            child: pw.Text(
+                              action.schema,
+                              style: pw.TextStyle(
+                                fontSize: 10,
+                                fontWeight: pw.FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          pw.Expanded(
+                            flex: 5,
+                            child: pw.Text(
+                              action.action,
+                              style: const pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                          pw.Container(
+                            padding: const pw.EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: pw.BoxDecoration(
+                              color: PdfColors.grey300,
+                              borderRadius: const pw.BorderRadius.all(
+                                  pw.Radius.circular(3)),
+                            ),
+                            child: pw.Text(
+                              elapsedTime,
+                              style: pw.TextStyle(
+                                fontSize: 9,
+                                fontWeight: pw.FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+
+            // Missing Actions Section
+            if (missingActions.isNotEmpty) ...[
+              pw.SizedBox(height: 20),
               pw.Container(
                 padding: const pw.EdgeInsets.all(15),
                 decoration: pw.BoxDecoration(
-                  color: PdfColors.green50,
-                  border: pw.Border.all(color: PdfColors.green200, width: 2),
+                  color: PdfColors.orange50,
+                  border: pw.Border.all(color: PdfColors.orange200, width: 2),
                   borderRadius:
                       const pw.BorderRadius.all(pw.Radius.circular(8)),
                 ),
@@ -103,166 +237,66 @@ class PdfService {
                   children: [
                     pw.Row(
                       children: [
-                        pw.Container(width: 4, height: 20, color: PdfColors.green),
+                        pw.Container(width: 4, height: 20, color: PdfColors.orange),
                         pw.SizedBox(width: 10),
                         pw.Text(
-                          'DURCHGEFÜHRTE MASSNAHMEN (${completedActions.length})',
+                          'FEHLENDE VERPFLICHTENDE MASSNAHMEN (${missingActions.length})',
                           style: pw.TextStyle(
                             fontSize: 16,
                             fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.green900,
+                            color: PdfColors.orange900,
                           ),
                         ),
                       ],
                     ),
                     pw.SizedBox(height: 10),
-                    ...sortedCompleted.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final action = entry.value;
-                      final elapsed = action.timestamp.difference(firstTimeStamp);
-                      final elapsedTime =
-                          '+${elapsed.inMinutes}:${(elapsed.inSeconds % 60).toString().padLeft(2, '0')} min';
-
-                      return pw.Container(
-                        margin: const pw.EdgeInsets.symmetric(vertical: 3),
-                        padding: const pw.EdgeInsets.all(8),
-                        decoration: pw.BoxDecoration(
-                          color: index % 2 == 0 ? PdfColors.white : PdfColors.grey100,
-                          borderRadius:
-                              const pw.BorderRadius.all(pw.Radius.circular(4)),
-                        ),
-                        child: pw.Row(
-                          children: [
-                            pw.Container(
-                              width: 25,
-                              alignment: pw.Alignment.center,
-                              child: pw.Text(
-                                '${index + 1}.',
-                                style: pw.TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: pw.FontWeight.bold,
-                                  color: PdfColors.grey700,
+                    ...missingActions.map((action) => pw.Padding(
+                          padding:
+                              const pw.EdgeInsets.symmetric(vertical: 2),
+                          child: pw.Row(
+                            children: [
+                              pw.Container(
+                                width: 6,
+                                height: 6,
+                                decoration: const pw.BoxDecoration(
+                                  color: PdfColors.orange,
+                                  shape: pw.BoxShape.circle,
                                 ),
                               ),
-                            ),
-                            pw.SizedBox(width: 10),
-                            pw.Expanded(
-                              flex: 2,
-                              child: pw.Text(
-                                action.schema,
-                                style: pw.TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            pw.Expanded(
-                              flex: 5,
-                              child: pw.Text(
-                                action.action,
+                              pw.SizedBox(width: 8),
+                              pw.Text(
+                                '${action.schema} - ${action.action}',
                                 style: const pw.TextStyle(fontSize: 10),
                               ),
-                            ),
-                            pw.Container(
-                              padding: const pw.EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: pw.BoxDecoration(
-                                color: PdfColors.grey300,
-                                borderRadius: const pw.BorderRadius.all(
-                                    pw.Radius.circular(3)),
-                              ),
-                              child: pw.Text(
-                                elapsedTime,
-                                style: pw.TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
+                            ],
+                          ),
+                        )),
                   ],
                 ),
               ),
+            ],
 
-              // Missing Actions Section
-              if (missingActions.isNotEmpty) ...[
-                pw.SizedBox(height: 20),
-                pw.Container(
-                  padding: const pw.EdgeInsets.all(15),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.orange50,
-                    border: pw.Border.all(color: PdfColors.orange200, width: 2),
-                    borderRadius:
-                        const pw.BorderRadius.all(pw.Radius.circular(8)),
-                  ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Row(
-                        children: [
-                          pw.Container(width: 4, height: 20, color: PdfColors.orange),
-                          pw.SizedBox(width: 10),
-                          pw.Text(
-                            'FEHLENDE VERPFLICHTENDE MASSNAHMEN (${missingActions.length})',
-                            style: pw.TextStyle(
-                              fontSize: 16,
-                              fontWeight: pw.FontWeight.bold,
-                              color: PdfColors.orange900,
-                            ),
-                          ),
-                        ],
-                      ),
-                      pw.SizedBox(height: 10),
-                      ...missingActions.map((action) => pw.Padding(
-                            padding:
-                                const pw.EdgeInsets.symmetric(vertical: 2),
-                            child: pw.Row(
-                              children: [
-                                pw.Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: const pw.BoxDecoration(
-                                    color: PdfColors.orange,
-                                    shape: pw.BoxShape.circle,
-                                  ),
-                                ),
-                                pw.SizedBox(width: 8),
-                                pw.Text(
-                                  '${action.schema} - ${action.action}',
-                                  style: const pw.TextStyle(fontSize: 10),
-                                ),
-                              ],
-                            ),
-                          )),
-                    ],
-                  ),
-                ),
-              ],
+            ..._buildNotesSection(notes),
 
-              // Footer
-              pw.SizedBox(height: 30),
-              pw.Divider(color: PdfColors.grey400),
-              pw.SizedBox(height: 10),
-              pw.Text(
-                'Dieser Bericht dient ausschließlich Ausbildungs- und Trainingszwecken im Rettungsdienst.',
-                style: pw.TextStyle(
-                  fontSize: 9,
-                  color: PdfColors.grey600,
-                  fontStyle: pw.FontStyle.italic,
-                ),
-                textAlign: pw.TextAlign.center,
+            // Footer
+            pw.SizedBox(height: 30),
+            pw.Divider(color: PdfColors.grey400),
+            pw.SizedBox(height: 10),
+            pw.Text(
+              'Dieser Bericht dient ausschließlich Ausbildungs- und Trainingszwecken im Rettungsdienst.',
+              style: pw.TextStyle(
+                fontSize: 9,
+                color: PdfColors.grey600,
+                fontStyle: pw.FontStyle.italic,
               ),
-            ];
-          },
-        ),
-      );
-    }
+              textAlign: pw.TextAlign.center,
+            ),
+          ];
+        },
+      ),
+    );
 
-    await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save());
+    return pdf;
   }
 
   /// Erzeugt und öffnet den Bericht für den Reanimationsmodus
@@ -276,376 +310,492 @@ class PdfService {
     required int targetCompressionRatio,
     required int targetVentilationRatio,
     required DateTime? resuscitationStart,
-    required double bpm,
+    required Duration resuscitationDuration,
     required List<Map<String, dynamic>> bpmHistory,
     required List<Map<String, dynamic>> ventilationHistory,
     required Map<String, VehicleStatus> vehicleStatus,
+    String? scenarioName,
+    String? notes,
   }) async {
-    final pdf = pw.Document();
+    final pdf = await buildResuscitationPdf(
+      completedActions: completedActions,
+      missingActions: missingActions,
+      userQualification: userQualification,
+      isChildResuscitation: isChildResuscitation,
+      compressionCount: compressionCount,
+      ventilationCount: ventilationCount,
+      targetCompressionRatio: targetCompressionRatio,
+      targetVentilationRatio: targetVentilationRatio,
+      resuscitationStart: resuscitationStart,
+      resuscitationDuration: resuscitationDuration,
+      bpmHistory: bpmHistory,
+      ventilationHistory: ventilationHistory,
+      vehicleStatus: vehicleStatus,
+      scenarioName: scenarioName,
+      notes: notes,
+    );
+    await _output(pdf, 'Reanimationsbericht', scenarioName);
+  }
 
-    if (completedActions.isNotEmpty) {
-      DateTime firstActionTime = completedActions.first.timestamp;
-      final now = DateTime.now();
+  /// Baut den Reanimationsbericht (ohne ihn anzuzeigen)
+  static Future<pw.Document> buildResuscitationPdf({
+    required List<CompletedAction> completedActions,
+    required List<MissingAction> missingActions,
+    required Qualification userQualification,
+    required bool isChildResuscitation,
+    required int compressionCount,
+    required int ventilationCount,
+    required int targetCompressionRatio,
+    required int targetVentilationRatio,
+    required DateTime? resuscitationStart,
+    required Duration resuscitationDuration,
+    required List<Map<String, dynamic>> bpmHistory,
+    required List<Map<String, dynamic>> ventilationHistory,
+    required Map<String, VehicleStatus> vehicleStatus,
+    String? scenarioName,
+    String? notes,
+  }) async {
+    final pdf = pw.Document(theme: await _pdfTheme());
 
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(40),
-          build: (pw.Context context) {
-            return [
-              // Header
-              pw.Container(
-                padding: const pw.EdgeInsets.all(20),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.blue900,
-                  borderRadius:
-                      const pw.BorderRadius.all(pw.Radius.circular(10)),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      'PATIENTENVERSORGUNGSBERICHT',
-                      style: pw.TextStyle(
-                        fontSize: 28,
-                        fontWeight: pw.FontWeight.bold,
-                        color: PdfColors.white,
-                      ),
+    // Mittelwert über alle gemessenen Frequenzen (nicht nur der letzte Wert)
+    final bpmValues =
+        bpmHistory.map((e) => (e['bpm'] as num).toDouble()).toList();
+    final averageBpm = bpmValues.isEmpty
+        ? 0.0
+        : bpmValues.reduce((a, b) => a + b) / bpmValues.length;
+
+    // Zeiten im Protokoll relativ zur ersten Maßnahme
+    final firstActionTime = completedActions.isNotEmpty
+        ? completedActions.first.timestamp
+        : DateTime.now();
+    final now = DateTime.now();
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(40),
+        build: (pw.Context context) {
+          return [
+            // Header
+            pw.Container(
+              padding: const pw.EdgeInsets.all(20),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.blue900,
+                borderRadius:
+                    const pw.BorderRadius.all(pw.Radius.circular(10)),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'PATIENTENVERSORGUNGSBERICHT',
+                    style: pw.TextStyle(
+                      fontSize: 28,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.white,
                     ),
-                    pw.SizedBox(height: 8),
-                    pw.Text(
-                      'Reanimation - ${isChildResuscitation ? "Kind/Säugling" : "Erwachsener"}',
-                      style: pw.TextStyle(
-                        fontSize: 14,
-                        color: PdfColors.grey300,
-                      ),
+                  ),
+                  pw.SizedBox(height: 8),
+                  pw.Text(
+                    'Reanimation - ${isChildResuscitation ? "Kind/Säugling" : "Erwachsener"}',
+                    style: pw.TextStyle(
+                      fontSize: 14,
+                      color: PdfColors.grey300,
                     ),
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    'Qualifikation: ${userQualification.name}',
+                    style: pw.TextStyle(
+                      fontSize: 14,
+                      color: PdfColors.white,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  if (scenarioName != null) ...[
                     pw.SizedBox(height: 4),
                     pw.Text(
-                      'Qualifikation: ${userQualification.name}',
-                      style: pw.TextStyle(
+                      'Szenario: $scenarioName',
+                      style: const pw.TextStyle(
                         fontSize: 14,
                         color: PdfColors.white,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                    pw.SizedBox(height: 4),
-                    pw.Text(
-                      'Erstellt: ${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year} um ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')} Uhr',
-                      style: pw.TextStyle(
-                        fontSize: 11,
-                        color: PdfColors.grey300,
                       ),
                     ),
                   ],
-                ),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    'Erstellt: ${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year} um ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')} Uhr',
+                    style: pw.TextStyle(
+                      fontSize: 11,
+                      color: PdfColors.grey300,
+                    ),
+                  ),
+                ],
               ),
-              pw.SizedBox(height: 25),
+            ),
+            pw.SizedBox(height: 25),
 
-              // Reanimation Statistics Section
-              pw.Container(
-                padding: const pw.EdgeInsets.all(15),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.red50,
-                  border: pw.Border.all(color: PdfColors.red200, width: 2),
-                  borderRadius:
-                      const pw.BorderRadius.all(pw.Radius.circular(8)),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Row(
-                      children: [
-                        pw.Container(width: 4, height: 20, color: PdfColors.red),
-                        pw.SizedBox(width: 10),
-                        pw.Text(
-                          'REANIMATIONSSTATISTIK',
-                          style: pw.TextStyle(
-                            fontSize: 16,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.red900,
-                          ),
-                        ),
-                      ],
-                    ),
-                    pw.SizedBox(height: 12),
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildStatBox('Kompressionen', '$compressionCount', PdfColors.red),
-                        _buildStatBox('Beatmungen', '$ventilationCount', PdfColors.blue),
-                        _buildStatBox('Verhältnis', '$targetCompressionRatio:$targetVentilationRatio', PdfColors.green),
-                      ],
-                    ),
-                    if (resuscitationStart != null) ...[
-                      pw.SizedBox(height: 10),
-                      pw.Divider(color: PdfColors.red200),
-                      pw.SizedBox(height: 10),
+            // Reanimation Statistics Section
+            pw.Container(
+              padding: const pw.EdgeInsets.all(15),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.red50,
+                border: pw.Border.all(color: PdfColors.red200, width: 2),
+                borderRadius:
+                    const pw.BorderRadius.all(pw.Radius.circular(8)),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    children: [
+                      pw.Container(width: 4, height: 20, color: PdfColors.red),
+                      pw.SizedBox(width: 10),
                       pw.Text(
-                        'Reanimationsdauer: ${DateTime.now().difference(resuscitationStart).inMinutes} Minuten',
+                        'REANIMATIONSSTATISTIK',
+                        style: pw.TextStyle(
+                          fontSize: 16,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.red900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  pw.SizedBox(height: 12),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildStatBox('Kompressionen', '$compressionCount', PdfColors.red),
+                      _buildStatBox('Beatmungen', '$ventilationCount', PdfColors.blue),
+                      _buildStatBox('Verhältnis', '$targetCompressionRatio:$targetVentilationRatio', PdfColors.green),
+                    ],
+                  ),
+                  if (resuscitationStart != null) ...[
+                    pw.SizedBox(height: 10),
+                    pw.Divider(color: PdfColors.red200),
+                    pw.SizedBox(height: 10),
+                    pw.Text(
+                      'Reanimationsdauer: ${resuscitationDuration.inMinutes}:${(resuscitationDuration.inSeconds % 60).toString().padLeft(2, '0')} min',
+                      style: const pw.TextStyle(fontSize: 11),
+                    ),
+                    if (averageBpm > 0)
+                      pw.Text(
+                        'Durchschnittliche Frequenz: ${averageBpm.toStringAsFixed(0)} BPM',
                         style: const pw.TextStyle(fontSize: 11),
                       ),
-                      if (bpm > 0)
-                        pw.Text(
-                          'Durchschnittliche Frequenz: ${bpm.toStringAsFixed(0)} BPM',
-                          style: const pw.TextStyle(fontSize: 11),
-                        ),
-                    ],
                   ],
-                ),
+                ],
               ),
-              pw.SizedBox(height: 20),
+            ),
+            pw.SizedBox(height: 20),
 
-              // Reanimation Graph
-              _buildReanimationGraph(
-                bpmHistory: bpmHistory,
-                ventilationHistory: ventilationHistory,
-                resuscitationStart: resuscitationStart,
+            // Reanimation Graph
+            _buildReanimationGraph(
+              bpmHistory: bpmHistory,
+              ventilationHistory: ventilationHistory,
+              resuscitationStart: resuscitationStart,
+            ),
+            if (bpmHistory.isNotEmpty) pw.SizedBox(height: 20),
+
+            // Vehicle Status Section
+            pw.Container(
+              padding: const pw.EdgeInsets.all(15),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.blue50,
+                border: pw.Border.all(color: PdfColors.blue200, width: 2),
+                borderRadius:
+                    const pw.BorderRadius.all(pw.Radius.circular(8)),
               ),
-              if (bpmHistory.isNotEmpty) pw.SizedBox(height: 20),
-
-              // Vehicle Status Section
-              pw.Container(
-                padding: const pw.EdgeInsets.all(15),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.blue50,
-                  border: pw.Border.all(color: PdfColors.blue200, width: 2),
-                  borderRadius:
-                      const pw.BorderRadius.all(pw.Radius.circular(8)),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Row(
-                      children: [
-                        pw.Container(width: 4, height: 20, color: PdfColors.blue),
-                        pw.SizedBox(width: 10),
-                        pw.Text(
-                          'RETTUNGSMITTEL',
-                          style: pw.TextStyle(
-                            fontSize: 16,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.blue900,
-                          ),
-                        ),
-                      ],
-                    ),
-                    pw.SizedBox(height: 10),
-                    ...vehicleStatus.entries
-                        .where((entry) => entry.value != VehicleStatus.none)
-                        .map((entry) => pw.Padding(
-                              padding: const pw.EdgeInsets.symmetric(vertical: 3),
-                              child: pw.Row(
-                                children: [
-                                  pw.Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: pw.BoxDecoration(
-                                      color: entry.value == VehicleStatus.kommt
-                                          ? PdfColors.red
-                                          : PdfColors.blue,
-                                      shape: pw.BoxShape.circle,
-                                    ),
-                                  ),
-                                  pw.SizedBox(width: 8),
-                                  pw.Text(
-                                    '${entry.key}: ${entry.value == VehicleStatus.kommt ? "Auf Anfahrt" : "Besetzt"}',
-                                    style: const pw.TextStyle(fontSize: 11),
-                                  ),
-                                ],
-                              ),
-                            )),
-                  ],
-                ),
-              ),
-              pw.SizedBox(height: 20),
-
-              // Timeline Section
-              pw.Container(
-                padding: const pw.EdgeInsets.all(15),
-                decoration: pw.BoxDecoration(
-                  color: PdfColors.green50,
-                  border: pw.Border.all(color: PdfColors.green200, width: 2),
-                  borderRadius:
-                      const pw.BorderRadius.all(pw.Radius.circular(8)),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Row(
-                      children: [
-                        pw.Container(width: 4, height: 20, color: PdfColors.green),
-                        pw.SizedBox(width: 10),
-                        pw.Text(
-                          'MASSNAHMEN-PROTOKOLL (${completedActions.length} durchgeführt)',
-                          style: pw.TextStyle(
-                            fontSize: 16,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.green900,
-                          ),
-                        ),
-                      ],
-                    ),
-                    pw.SizedBox(height: 12),
-                    ...completedActions.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final action = entry.value;
-                      final diff = action.timestamp.difference(firstActionTime);
-                      final elapsedTime =
-                          '+${diff.inMinutes}:${(diff.inSeconds % 60).toString().padLeft(2, '0')} min';
-                      firstActionTime = action.timestamp;
-
-                      return pw.Container(
-                        margin: const pw.EdgeInsets.only(bottom: 6),
-                        padding: const pw.EdgeInsets.all(8),
-                        decoration: pw.BoxDecoration(
-                          color: index % 2 == 0
-                              ? PdfColors.white
-                              : PdfColors.green100,
-                          borderRadius:
-                              const pw.BorderRadius.all(pw.Radius.circular(4)),
-                        ),
-                        child: pw.Row(
-                          children: [
-                            pw.Container(
-                              width: 24,
-                              height: 24,
-                              decoration: pw.BoxDecoration(
-                                color: PdfColors.green,
-                                shape: pw.BoxShape.circle,
-                              ),
-                              child: pw.Center(
-                                child: pw.Text(
-                                  '${index + 1}',
-                                  style: pw.TextStyle(
-                                    color: PdfColors.white,
-                                    fontSize: 10,
-                                    fontWeight: pw.FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            pw.SizedBox(width: 10),
-                            pw.Expanded(
-                              flex: 2,
-                              child: pw.Text(
-                                action.schema,
-                                style: pw.TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            pw.Expanded(
-                              flex: 5,
-                              child: pw.Text(
-                                action.action,
-                                style: const pw.TextStyle(fontSize: 10),
-                              ),
-                            ),
-                            pw.Container(
-                              padding: const pw.EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: pw.BoxDecoration(
-                                color: PdfColors.grey300,
-                                borderRadius: const pw.BorderRadius.all(
-                                    pw.Radius.circular(3)),
-                              ),
-                              child: pw.Text(
-                                elapsedTime,
-                                style: pw.TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }),
-                  ],
-                ),
-              ),
-
-              // Missing Actions Section
-              if (missingActions.isNotEmpty) ...[
-                pw.SizedBox(height: 20),
-                pw.Container(
-                  padding: const pw.EdgeInsets.all(15),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.orange50,
-                    border: pw.Border.all(color: PdfColors.orange200, width: 2),
-                    borderRadius:
-                        const pw.BorderRadius.all(pw.Radius.circular(8)),
-                  ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
                     children: [
-                      pw.Row(
-                        children: [
-                          pw.Container(width: 4, height: 20, color: PdfColors.orange),
-                          pw.SizedBox(width: 10),
-                          pw.Text(
-                            'FEHLENDE MASSNAHMEN (${missingActions.length})',
-                            style: pw.TextStyle(
-                              fontSize: 16,
-                              fontWeight: pw.FontWeight.bold,
-                              color: PdfColors.orange900,
-                            ),
-                          ),
-                        ],
+                      pw.Container(width: 4, height: 20, color: PdfColors.blue),
+                      pw.SizedBox(width: 10),
+                      pw.Text(
+                        'RETTUNGSMITTEL',
+                        style: pw.TextStyle(
+                          fontSize: 16,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.blue900,
+                        ),
                       ),
-                      pw.SizedBox(height: 10),
-                      ...missingActions.map((action) => pw.Padding(
-                            padding:
-                                const pw.EdgeInsets.symmetric(vertical: 2),
+                    ],
+                  ),
+                  pw.SizedBox(height: 10),
+                  ...vehicleStatus.entries
+                      .where((entry) => entry.value != VehicleStatus.none)
+                      .map((entry) => pw.Padding(
+                            padding: const pw.EdgeInsets.symmetric(vertical: 3),
                             child: pw.Row(
                               children: [
                                 pw.Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: const pw.BoxDecoration(
-                                    color: PdfColors.orange,
+                                  width: 8,
+                                  height: 8,
+                                  decoration: pw.BoxDecoration(
+                                    color: entry.value == VehicleStatus.kommt
+                                        ? PdfColors.red
+                                        : PdfColors.blue,
                                     shape: pw.BoxShape.circle,
                                   ),
                                 ),
                                 pw.SizedBox(width: 8),
                                 pw.Text(
-                                  '${action.schema} - ${action.action}',
-                                  style: const pw.TextStyle(fontSize: 10),
+                                  '${entry.key}: ${entry.value == VehicleStatus.kommt ? "Auf Anfahrt" : "Besetzt"}',
+                                  style: const pw.TextStyle(fontSize: 11),
                                 ),
                               ],
                             ),
                           )),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 20),
+
+            // Timeline Section
+            pw.Container(
+              padding: const pw.EdgeInsets.all(15),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.green50,
+                border: pw.Border.all(color: PdfColors.green200, width: 2),
+                borderRadius:
+                    const pw.BorderRadius.all(pw.Radius.circular(8)),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    children: [
+                      pw.Container(width: 4, height: 20, color: PdfColors.green),
+                      pw.SizedBox(width: 10),
+                      pw.Text(
+                        'MASSNAHMEN-PROTOKOLL (${completedActions.length} durchgeführt)',
+                        style: pw.TextStyle(
+                          fontSize: 16,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.green900,
+                        ),
+                      ),
                     ],
                   ),
-                ),
-              ],
+                  pw.SizedBox(height: 12),
+                  ...completedActions.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final action = entry.value;
+                    final diff = action.timestamp.difference(firstActionTime);
+                    final elapsedTime =
+                        '+${diff.inMinutes}:${(diff.inSeconds % 60).toString().padLeft(2, '0')} min';
 
-              // Footer
-              pw.SizedBox(height: 30),
-              pw.Divider(color: PdfColors.grey400),
-              pw.SizedBox(height: 10),
-              pw.Text(
-                'Dieser Bericht dient ausschließlich Ausbildungs- und Trainingszwecken im Rettungsdienst.',
-                style: pw.TextStyle(
-                  fontSize: 9,
-                  color: PdfColors.grey600,
-                  fontStyle: pw.FontStyle.italic,
-                ),
-                textAlign: pw.TextAlign.center,
+                    return pw.Container(
+                      margin: const pw.EdgeInsets.only(bottom: 6),
+                      padding: const pw.EdgeInsets.all(8),
+                      decoration: pw.BoxDecoration(
+                        color: index % 2 == 0
+                            ? PdfColors.white
+                            : PdfColors.green100,
+                        borderRadius:
+                            const pw.BorderRadius.all(pw.Radius.circular(4)),
+                      ),
+                      child: pw.Row(
+                        children: [
+                          pw.Container(
+                            width: 24,
+                            height: 24,
+                            decoration: pw.BoxDecoration(
+                              color: PdfColors.green,
+                              shape: pw.BoxShape.circle,
+                            ),
+                            child: pw.Center(
+                              child: pw.Text(
+                                '${index + 1}',
+                                style: pw.TextStyle(
+                                  color: PdfColors.white,
+                                  fontSize: 10,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          pw.SizedBox(width: 10),
+                          pw.Expanded(
+                            flex: 2,
+                            child: pw.Text(
+                              action.schema,
+                              style: pw.TextStyle(
+                                fontSize: 10,
+                                fontWeight: pw.FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          pw.Expanded(
+                            flex: 5,
+                            child: pw.Text(
+                              action.action,
+                              style: const pw.TextStyle(fontSize: 10),
+                            ),
+                          ),
+                          pw.Container(
+                            padding: const pw.EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: pw.BoxDecoration(
+                              color: PdfColors.grey300,
+                              borderRadius: const pw.BorderRadius.all(
+                                  pw.Radius.circular(3)),
+                            ),
+                            child: pw.Text(
+                              elapsedTime,
+                              style: pw.TextStyle(
+                                fontSize: 9,
+                                fontWeight: pw.FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
               ),
-            ];
-          },
-        ),
-      );
-    }
+            ),
 
-    await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save());
+            // Missing Actions Section
+            if (missingActions.isNotEmpty) ...[
+              pw.SizedBox(height: 20),
+              pw.Container(
+                padding: const pw.EdgeInsets.all(15),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.orange50,
+                  border: pw.Border.all(color: PdfColors.orange200, width: 2),
+                  borderRadius:
+                      const pw.BorderRadius.all(pw.Radius.circular(8)),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Row(
+                      children: [
+                        pw.Container(width: 4, height: 20, color: PdfColors.orange),
+                        pw.SizedBox(width: 10),
+                        pw.Text(
+                          'FEHLENDE MASSNAHMEN (${missingActions.length})',
+                          style: pw.TextStyle(
+                            fontSize: 16,
+                            fontWeight: pw.FontWeight.bold,
+                            color: PdfColors.orange900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    pw.SizedBox(height: 10),
+                    ...missingActions.map((action) => pw.Padding(
+                          padding:
+                              const pw.EdgeInsets.symmetric(vertical: 2),
+                          child: pw.Row(
+                            children: [
+                              pw.Container(
+                                width: 6,
+                                height: 6,
+                                decoration: const pw.BoxDecoration(
+                                  color: PdfColors.orange,
+                                  shape: pw.BoxShape.circle,
+                                ),
+                              ),
+                              pw.SizedBox(width: 8),
+                              pw.Text(
+                                '${action.schema} - ${action.action}',
+                                style: const pw.TextStyle(fontSize: 10),
+                              ),
+                            ],
+                          ),
+                        )),
+                  ],
+                ),
+              ),
+            ],
+
+            ..._buildNotesSection(notes),
+
+            // Footer
+            pw.SizedBox(height: 30),
+            pw.Divider(color: PdfColors.grey400),
+            pw.SizedBox(height: 10),
+            pw.Text(
+              'Dieser Bericht dient ausschließlich Ausbildungs- und Trainingszwecken im Rettungsdienst.',
+              style: pw.TextStyle(
+                fontSize: 9,
+                color: PdfColors.grey600,
+                fontStyle: pw.FontStyle.italic,
+              ),
+              textAlign: pw.TextAlign.center,
+            ),
+          ];
+        },
+      ),
+    );
+
+    return pdf;
   }
 
   // ── Gemeinsame PDF-Hilfswidgets ─────────────────────────────────────────
+
+  static pw.ThemeData? _theme;
+
+  /// Liberation Sans statt der eingebauten Helvetica: Helvetica kann im PDF
+  /// u. a. „–“ und „₂“ (SpO₂) nicht darstellen.
+  static Future<pw.ThemeData> _pdfTheme() async {
+    if (_theme != null) return _theme!;
+    Future<pw.Font> load(String name) async =>
+        pw.Font.ttf(await rootBundle.load('assets/fonts/LiberationSans-$name.ttf'));
+    return _theme = pw.ThemeData.withFont(
+      base: await load('Regular'),
+      bold: await load('Bold'),
+      italic: await load('Italic'),
+      boldItalic: await load('BoldItalic'),
+    );
+  }
+
+  /// Öffnet die Druck-/Teilen-Ansicht; der Dateiname enthält Szenario und Datum.
+  static Future<void> _output(
+      pw.Document pdf, String title, String? scenarioName) {
+    final now = DateTime.now();
+    final date = '${now.year}-${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+    final scenarioPart = scenarioName == null
+        ? ''
+        : '_${scenarioName.replaceAll(RegExp(r'[^A-Za-z0-9ÄÖÜäöüß]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '')}';
+    return Printing.layoutPdf(
+      name: '$title${scenarioPart}_$date.pdf',
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+    );
+  }
+
+  static List<pw.Widget> _buildNotesSection(String? notes) {
+    if (notes == null || notes.trim().isEmpty) return const [];
+    return [
+      pw.SizedBox(height: 20),
+      pw.Container(
+        width: double.infinity,
+        padding: const pw.EdgeInsets.all(15),
+        decoration: pw.BoxDecoration(
+          color: PdfColors.grey100,
+          border: pw.Border.all(color: PdfColors.grey400),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              'NOTIZEN',
+              style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 8),
+            pw.Text(notes.trim(), style: const pw.TextStyle(fontSize: 11)),
+          ],
+        ),
+      ),
+    ];
+  }
 
   static pw.Widget _buildStatBox(String label, String value, PdfColor color) {
     return pw.Container(

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/scenario.dart';
+import '../utils/adaptive_colors.dart';
+import '../widgets/responsive.dart';
 
 class ScenarioLibraryScreen extends StatefulWidget {
   const ScenarioLibraryScreen({super.key});
@@ -63,7 +65,8 @@ class _ScenarioLibraryScreenState extends State<ScenarioLibraryScreen> {
           ),
         ),
       ),
-      body: Column(
+      body: ResponsiveCenter(
+        child: Column(
         children: [
           // Search bar
           Padding(
@@ -108,7 +111,7 @@ class _ScenarioLibraryScreenState extends State<ScenarioLibraryScreen> {
                 ? Center(
                     child: Text(
                       'Keine Szenarien gefunden.',
-                      style: TextStyle(color: Colors.grey.shade600),
+                      style: TextStyle(color: context.mutedText),
                     ),
                   )
                 : ListView.builder(
@@ -125,6 +128,7 @@ class _ScenarioLibraryScreenState extends State<ScenarioLibraryScreen> {
           ),
         ],
       ),
+      ),
     );
   }
 
@@ -137,7 +141,7 @@ class _ScenarioLibraryScreenState extends State<ScenarioLibraryScreen> {
         selected: selected,
         onSelected: (_) =>
             setState(() => _selectedCategory = category),
-        selectedColor: Colors.blue.shade100,
+        selectedColor: context.softBg(Colors.blue),
         checkmarkColor: Colors.blue.shade700,
       ),
     );
@@ -201,7 +205,7 @@ class _ScenarioCardState extends State<_ScenarioCard> {
                         Text(s.description,
                             style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey.shade600),
+                                color: context.mutedText),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis),
                         const SizedBox(height: 6),

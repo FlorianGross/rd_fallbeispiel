@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'Screens/setup_screen.dart';
 
@@ -6,8 +9,37 @@ import 'Screens/setup_screen.dart';
 final ValueNotifier<ThemeMode> themeModeNotifier =
     ValueNotifier(ThemeMode.light);
 
-void main() {
+const String _themeModeKey = 'theme_mode';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await _restoreThemeMode();
+  _registerFontLicense();
   runApp(const PatientCareApp());
+}
+
+/// Lizenz der mitgelieferten PDF-Schrift auf der Lizenzseite anzeigen
+void _registerFontLicense() {
+  LicenseRegistry.addLicense(() async* {
+    final text =
+        await rootBundle.loadString('assets/fonts/LiberationSans-LICENSE.txt');
+    yield LicenseEntryWithLineBreaks(['Liberation Sans'], text);
+  });
+}
+
+/// Lädt den zuletzt gewählten Hell/Dunkel-Modus und speichert jede Änderung.
+Future<void> _restoreThemeMode() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getString(_themeModeKey) == ThemeMode.dark.name) {
+      themeModeNotifier.value = ThemeMode.dark;
+    }
+    themeModeNotifier.addListener(() {
+      prefs.setString(_themeModeKey, themeModeNotifier.value.name);
+    });
+  } catch (e) {
+    debugPrint('Theme-Einstellung nicht verfügbar: $e');
+  }
 }
 
 class PatientCareApp extends StatelessWidget {

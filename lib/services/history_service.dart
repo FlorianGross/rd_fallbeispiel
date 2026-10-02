@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/session_record.dart';
@@ -12,10 +13,27 @@ class HistoryService {
     final prefs = await SharedPreferences.getInstance();
     final jsonStr = prefs.getString(_key);
     if (jsonStr == null) return [];
-    final List<dynamic> jsonList = json.decode(jsonStr) as List<dynamic>;
-    final records = jsonList
-        .map((j) => SessionRecord.fromJson(j as Map<String, dynamic>))
-        .toList();
+
+    // Beschädigte oder veraltete Daten dürfen die App nicht blockieren:
+    // ungültige Einträge werden übersprungen, statt den Verlauf zu verlieren.
+    List<dynamic> jsonList;
+    try {
+      final decoded = json.decode(jsonStr);
+      if (decoded is! List) return [];
+      jsonList = decoded;
+    } catch (e) {
+      debugPrint('Verlauf konnte nicht gelesen werden: $e');
+      return [];
+    }
+
+    final records = <SessionRecord>[];
+    for (final j in jsonList) {
+      try {
+        records.add(SessionRecord.fromJson(j as Map<String, dynamic>));
+      } catch (e) {
+        debugPrint('Ungültiger Verlaufseintrag übersprungen: $e');
+      }
+    }
     records.sort((a, b) => b.startTime.compareTo(a.startTime));
     return records;
   }

@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import '../measure_requirements.dart';
+import '../models/cpr_summary.dart';
 import '../services/history_service.dart';
+import '../services/pdf_service.dart';
 import '../utils/schema_icons.dart';
+import '../utils/adaptive_colors.dart';
+import '../widgets/bpm_chart.dart';
+import '../widgets/responsive.dart';
 
 class MeasuresOverviewScreen extends StatefulWidget {
   final List<CompletedAction> completedActions;
@@ -15,6 +20,22 @@ class MeasuresOverviewScreen extends StatefulWidget {
   final String? sessionId;
   final String? scenarioName;
 
+  /// Schemata, die bewertet wurden (null = alle)
+  final Set<String>? scoredSchemas;
+
+  /// Bereits gespeicherte Notiz (beim Öffnen aus dem Verlauf)
+  final String? initialNotes;
+
+  /// Aus dem Verlauf geöffnet (kein „automatisch gespeichert“-Hinweis)
+  final bool fromHistory;
+
+  /// Szenariodauer für den PDF-Bericht
+  final int? durationSeconds;
+
+  /// Gespeicherte Reanimations-Kennzahlen (beim Öffnen aus dem Verlauf, wo
+  /// der Frequenzverlauf selbst nicht mehr vorliegt)
+  final CprSummary? cprSummary;
+
   const MeasuresOverviewScreen({
     super.key,
     required this.completedActions,
@@ -27,6 +48,11 @@ class MeasuresOverviewScreen extends StatefulWidget {
     this.resuscitationStart,
     this.sessionId,
     this.scenarioName,
+    this.scoredSchemas,
+    this.initialNotes,
+    this.fromHistory = false,
+    this.durationSeconds,
+    this.cprSummary,
   });
 
   @override
@@ -44,7 +70,31 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
     if (widget.completedActions.isNotEmpty) {
       firstTimeStamp = widget.completedActions.first.timestamp;
     }
-    _notesCtrl = TextEditingController();
+    _notesCtrl = TextEditingController(text: widget.initialNotes ?? '');
+  }
+
+  /// Bericht inkl. Szenario und aktueller Notiz – auch für Einträge aus dem
+  /// Verlauf.
+  Future<void> _exportPdf() async {
+    try {
+      await PdfService.generateNormalPdf(
+        completedActions: widget.completedActions,
+        missingActions: widget.missingActions,
+        userQualification: widget.userQualification!,
+        elapsedSeconds: widget.durationSeconds ?? 0,
+        scenarioName: widget.scenarioName,
+        notes: _notesCtrl.text,
+      );
+    } catch (e) {
+      debugPrint('PDF-Export fehlgeschlagen: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('PDF konnte nicht erstellt werden'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -74,6 +124,14 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                   ? 'Maßnahmen Übersicht (${widget.userQualification!.name})'
                   : 'Maßnahmen Übersicht'
           ),
+          actions: [
+            if (widget.userQualification != null)
+              IconButton(
+                icon: const Icon(Icons.picture_as_pdf),
+                tooltip: 'Als PDF exportieren / teilen',
+                onPressed: _exportPdf,
+              ),
+          ],
           flexibleSpace: Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -114,15 +172,20 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             ],
           ),
         ),
-        body: TabBarView(
-          children: [
-            // Completed Actions Tab
-            _buildCompletedActionsView(),
-            // Missing Actions Tab
-            _buildMissingActionsView(),
-            // Statistics Tab
-            _buildStatisticsView(),
-          ],
+        body: ResponsiveCenter(
+          // Die Auswertung enthält Diagramme – etwas mehr Breite als bei
+          // reinen Formularen.
+          maxWidth: 900,
+          child: TabBarView(
+            children: [
+              // Completed Actions Tab
+              _buildCompletedActionsView(),
+              // Missing Actions Tab
+              _buildMissingActionsView(),
+              // Statistics Tab
+              _buildStatisticsView(),
+            ],
+          ),
         ),
       ),
     );
@@ -140,7 +203,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
               'Noch keine Maßnahmen durchgeführt',
               style: TextStyle(
                 fontSize: 18,
-                color: Colors.grey.shade600,
+                color: context.mutedText,
               ),
             ),
           ],
@@ -167,7 +230,6 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             ? requirement?.getRequirementLevel(widget.userQualification!)
             : RequirementLevel.required;
 
-        final isOptional = requirementLevel == RequirementLevel.optional;
         final isExpected = requirementLevel == RequirementLevel.expected;
         final isRequired = requirementLevel == RequirementLevel.required;
 
@@ -179,17 +241,17 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
 
         if (isRequired) {
           borderColor = Colors.green.shade200;
-          backgroundColor = Colors.green.shade50;
+          backgroundColor = context.softBg(Colors.green);
           textColor = Colors.green.shade700;
           levelText = null; // No badge for required
         } else if (isExpected) {
           borderColor = Colors.amber.shade300;
-          backgroundColor = Colors.amber.shade50;
+          backgroundColor = context.softBg(Colors.amber);
           textColor = Colors.amber.shade700;
           levelText = 'Erwartet';
         } else {
           borderColor = Colors.blue.shade300;
-          backgroundColor = Colors.blue.shade50;
+          backgroundColor = context.softBg(Colors.blue);
           textColor = Colors.blue.shade700;
           levelText = 'Optional';
         }
@@ -238,7 +300,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 Icon(
                   getSchemaIcon(schema),
                   size: 18,
-                  color: Colors.grey.shade700,
+                  color: context.mutedText,
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -279,7 +341,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             trailing: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.grey.shade200,
+                color: context.trackBg,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -287,7 +349,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 12,
-                  color: Colors.grey.shade800,
+                  color: context.mutedText,
                 ),
               ),
             ),
@@ -320,7 +382,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 'Für Qualifikation: ${widget.userQualification!.name}',
                 style: TextStyle(
                   fontSize: 14,
-                  color: Colors.grey.shade600,
+                  color: context.mutedText,
                 ),
               ),
           ],
@@ -345,7 +407,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
         if (widget.userQualification != null)
           Card(
             margin: const EdgeInsets.only(bottom: 16),
-            color: Colors.blue.shade50,
+            color: context.softBg(Colors.blue),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
               side: BorderSide(color: Colors.blue.shade200, width: 2),
@@ -360,7 +422,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                     child: Text(
                       'Diese Liste zeigt nur verpflichtende Maßnahmen für deine Qualifikation: ${widget.userQualification!.name}',
                       style: TextStyle(
-                        color: Colors.blue.shade900,
+                        color: context.strongFg(Colors.blue),
                         fontSize: 14,
                       ),
                     ),
@@ -392,7 +454,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
-                  color: Colors.orange.shade900,
+                  color: context.strongFg(Colors.orange),
                 ),
               ),
               subtitle: Text(
@@ -406,7 +468,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                 return Container(
                   margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
+                    color: context.softBg(Colors.orange),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: ListTile(
@@ -431,11 +493,18 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
   }
 
   Widget _buildStatisticsView() {
-    // Calculate statistics
-    final totalActions = widget.completedActions.length + widget.missingActions.length;
-    final completionRate = totalActions > 0
-        ? (widget.completedActions.length / totalActions * 100)
-        : 0.0;
+    // Vollständigkeit = erledigte Pflichtmaßnahmen / alle Pflichtmaßnahmen.
+    // Optionale Extras dürfen fehlende Pflichtmaßnahmen nicht ausgleichen.
+    final requiredDone = widget.userQualification != null
+        ? MeasureRequirements.countCompletedRequiredActions(
+            widget.completedActions,
+            widget.userQualification!,
+            onlySchemas: widget.scoredSchemas,
+          )
+        : widget.completedActions.length;
+    final totalRequired = requiredDone + widget.missingActions.length;
+    final completionRate =
+        totalRequired > 0 ? (requiredDone / totalRequired * 100) : 0.0;
 
     // Count by requirement level
     int completedRequired = 0;
@@ -504,12 +573,12 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         // Sitzung gespeichert Banner
-        if (widget.sessionId != null)
+        if (widget.sessionId != null && !widget.fromHistory)
           Container(
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.green.shade50,
+              color: context.softBg(Colors.green),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: Colors.green.shade200),
             ),
@@ -527,6 +596,8 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             ),
           ),
 
+        if (_cprSummary case final cpr?) _buildCprCard(cpr),
+
         // Qualification Info Card
         if (widget.userQualification != null)
           Card(
@@ -538,7 +609,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
                 gradient: LinearGradient(
-                  colors: [Colors.indigo.shade50, Colors.purple.shade50],
+                  colors: [context.softBg(Colors.indigo), context.softBg(Colors.purple)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -624,7 +695,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
               gradient: LinearGradient(
-                colors: [Colors.blue.shade50, Colors.cyan.shade50],
+                colors: [context.softBg(Colors.blue), context.softBg(Colors.cyan)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -670,7 +741,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                               child: CircularProgressIndicator(
                                 value: completionRate / 100,
                                 strokeWidth: 12,
-                                backgroundColor: Colors.grey.shade300,
+                                backgroundColor: context.trackBg,
                                 valueColor: AlwaysStoppedAnimation<Color>(
                                   completionRate >= 80 ? Colors.green :
                                   completionRate >= 60 ? Colors.orange : Colors.red,
@@ -693,7 +764,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                                   'Vollständigkeit',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.grey.shade700,
+                                    color: context.mutedText,
                                   ),
                                 ),
                               ],
@@ -819,7 +890,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                               Text(
                                 '$completed/$total ($percentage%)',
                                 style: TextStyle(
-                                  color: Colors.grey.shade700,
+                                  color: context.mutedText,
                                   fontSize: 12,
                                 ),
                               ),
@@ -828,7 +899,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                           const SizedBox(height: 4),
                           LinearProgressIndicator(
                             value: completed / total,
-                            backgroundColor: Colors.grey.shade200,
+                            backgroundColor: context.trackBg,
                             valueColor: AlwaysStoppedAnimation<Color>(
                               completed == total ? Colors.green : Colors.orange,
                             ),
@@ -890,18 +961,29 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
                           ? null
                           : () async {
                               setState(() => _savingNotes = true);
-                              await HistoryService.updateSessionNotes(
-                                  widget.sessionId!, _notesCtrl.text);
-                              if (mounted) {
-                                setState(() => _savingNotes = false);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Notiz gespeichert!'),
-                                    backgroundColor: Colors.green,
-                                    duration: Duration(seconds: 2),
-                                  ),
-                                );
+                              var saved = false;
+                              try {
+                                await HistoryService.updateSessionNotes(
+                                    widget.sessionId!, _notesCtrl.text);
+                                saved = true;
+                              } catch (e) {
+                                debugPrint('Notiz speichern fehlgeschlagen: $e');
+                              } finally {
+                                if (mounted) {
+                                  setState(() => _savingNotes = false);
+                                }
                               }
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(saved
+                                      ? 'Notiz gespeichert!'
+                                      : 'Notiz konnte nicht gespeichert werden'),
+                                  backgroundColor:
+                                      saved ? Colors.green : Colors.red,
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
                             },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.teal,
@@ -917,6 +999,137 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  CprSummary? get _cprSummary =>
+      widget.cprSummary ??
+      (widget.compressionCount == null
+          ? null
+          : CprSummary.fromHistory(
+              compressions: widget.compressionCount!,
+              ventilations: widget.ventilationCount ?? 0,
+              bpmHistory: widget.bpmHistory ?? const [],
+            ));
+
+  /// Kennzahlen + Frequenzverlauf der Reanimation
+  Widget _buildCprCard(CprSummary cpr) {
+    final share = cpr.targetShare;
+    // Status immer mit Symbol + Text, nie nur über die Farbe
+    final (IconData statusIcon, Color statusColor, String statusText) =
+        switch (share) {
+      null => (Icons.help_outline, context.mutedText, 'keine Messung'),
+      >= 0.8 => (Icons.check_circle, Colors.green, 'gut'),
+      >= 0.5 => (Icons.warning_amber, Colors.orange, 'mäßig'),
+      _ => (Icons.error_outline, Colors.red, 'niedrig'),
+    };
+    final showChart = (widget.bpmHistory?.isNotEmpty ?? false) &&
+        widget.resuscitationStart != null;
+
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.monitor_heart, color: Colors.red),
+                const SizedBox(width: 8),
+                Text(
+                  'Reanimation',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 2.2,
+              children: [
+                _cprTile('${cpr.compressions}', 'Kompressionen'),
+                _cprTile('${cpr.ventilations}', 'Beatmungen'),
+                _cprTile(
+                  cpr.averageBpm > 0
+                      ? '${cpr.averageBpm.toStringAsFixed(0)}/min'
+                      : '–',
+                  'Ø Frequenz',
+                ),
+                _cprTile(
+                  share == null ? '–' : '${(share * 100).toStringAsFixed(0)} %',
+                  'im Zielbereich',
+                  status: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(statusIcon, size: 14, color: statusColor),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(statusText,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                TextStyle(fontSize: 11, color: statusColor)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (showChart) ...[
+              const SizedBox(height: 16),
+              BpmChart(
+                bpmHistory: widget.bpmHistory!,
+                ventilationHistory: widget.ventilationHistory ?? const [],
+                start: widget.resuscitationStart!,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _cprTile(String value, String label, {Widget? status}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: context.softBg(Colors.grey),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Row(
+            children: [
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: context.onSurface,
+                ),
+              ),
+              if (status != null) ...[
+                const SizedBox(width: 8),
+                Flexible(child: status),
+              ],
+            ],
+          ),
+          Text(label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: context.mutedText)),
+        ],
+      ),
     );
   }
 
@@ -945,7 +1158,7 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
           label,
           style: TextStyle(
             fontSize: 12,
-            color: Colors.grey.shade700,
+            color: context.mutedText,
           ),
         ),
       ],

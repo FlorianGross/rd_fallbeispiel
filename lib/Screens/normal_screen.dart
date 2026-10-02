@@ -4,33 +4,38 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../measure_requirements.dart';
+import '../models/scenario.dart';
 import '../models/session_record.dart';
 import '../services/history_service.dart';
 import '../services/pdf_service.dart';
-import '../utils/schema_colors.dart';
-import '../utils/schema_descriptions.dart';
-import '../utils/schema_icons.dart';
+import '../utils/adaptive_colors.dart';
+import '../widgets/responsive.dart';
+import '../widgets/scenario_common.dart';
 import 'result_screen.dart';
+import 'scenario_session.dart';
 
 class SchemaSelectionScreen extends StatefulWidget {
   final Map<String, VehicleStatus> vehicleStatus;
   final Map<String, int?> vehicleArrivalMinutes;
   final Qualification userQualification;
-  final String? scenarioName;
+  /// Gewähltes Fallbeispiel (optional). Bestimmt, welche Schemata bewertet
+  /// werden, und liefert das Fallbild.
+  final PredefinedScenario? scenario;
 
   const SchemaSelectionScreen({
     super.key,
     required this.vehicleStatus,
     required this.vehicleArrivalMinutes,
     required this.userQualification,
-    this.scenarioName,
+    this.scenario,
   });
 
   @override
   _SchemaSelectionScreenState createState() => _SchemaSelectionScreenState();
 }
 
-class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
+class _SchemaSelectionScreenState extends State<SchemaSelectionScreen>
+    with ScenarioSessionMixin {
   // Verwende die Requirements aus dem Model
   Map<String, List<String>> get schemas {
     Map<String, List<String>> result = {};
@@ -43,89 +48,61 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   List<CompletedAction> completedActions = [];
   late Timer _timer;
   late Timer _arrivalCheckTimer;
-  int _elapsedSeconds = 0;
-  bool _isPaused = false;
-  late DateTime _scenarioStart;
-  late final Map<String, DateTime?> _vehicleArrivalTimes;
   bool _allExpanded = false;
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
 
-  // Track which vehicles have shown arrival notification
-  Set<String> _arrivedVehicles = {};
-
-  String get _formattedTime {
-    final m = _elapsedSeconds ~/ 60;
-    final s = _elapsedSeconds % 60;
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-  }
 
   /// Anzahl vollständig abgehakter Schemata (nur verpflichtende + erwartete)
+  /// Bewertete Schemata (null = alle, wenn kein Szenario gewählt ist)
+  Set<String>? get _scoredSchemas => widget.scenario?.scoredSchemas;
+
+  bool _isScored(String schema) => _scoredSchemas?.contains(schema) ?? true;
+
+  /// Bewertete Schemata zuerst, nicht bewertete am Ende (Reihenfolge sonst
+  /// wie im Katalog).
+  List<String> get _orderedSchemas => [
+        ...schemas.keys.where(_isScored),
+        ...schemas.keys.where((s) => !_isScored(s)),
+      ];
+
+  List<MissingAction> _missingActions() =>
+      MeasureRequirements.calculateMissingRequiredActions(
+        completedActions,
+        widget.userQualification,
+        onlySchemas: _scoredSchemas,
+      );
+
+  /// Schemata, die in den Fortschritt eingehen: bewertet und mit mindestens
+  /// einer verpflichtenden/erwarteten Maßnahme für diese Qualifikation.
+  Iterable<String> get _progressSchemas => schemas.keys.where((schema) =>
+      _isScored(schema) &&
+      MeasureRequirements.hasCountedMeasures(
+          schema, widget.userQualification));
+
   int get _completedSchemaCount {
-    return schemas.keys.where((schema) {
-      return schemas[schema]!.every((action) {
-        final req = MeasureRequirements.getRequirement(schema, action);
-        if (req != null &&
-            req.getRequirementLevel(widget.userQualification) ==
-                RequirementLevel.notApplicable) return true;
-        return completedActions
-            .any((e) => e.schema == schema && e.action == action);
-      });
-    }).length;
-  }
-
-  /// Formatierter Zeitstempel relativ zu Szenario-Start
-  String _relativeTime(DateTime ts) {
-    final diff = ts.difference(_scenarioStart);
-    final m = diff.inMinutes;
-    final s = diff.inSeconds % 60;
-    return '+${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-  }
-
-  // Set selectedVehicles to be finished
-  void finishVehicles() {
-    setState(() {
-      widget.vehicleStatus.forEach((key, value) {
-        if (value == VehicleStatus.kommt &&
-            !completedActions.any(
-                (e) => e.schema == 'Nachforderung' && e.action == key)) {
-          completedActions.add(CompletedAction(
-            schema: 'Nachforderung',
-            action: key,
-            timestamp: DateTime.now(),
-          ));
-        }
-      });
-    });
+    return _progressSchemas
+        .where((schema) => MeasureRequirements.isSchemaComplete(
+            schema, completedActions, widget.userQualification))
+        .length;
   }
 
   @override
   void initState() {
     super.initState();
 
-    // Ankunftszeiten werden ab Szenario-Start berechnet (nicht ab Setup)
-    _scenarioStart = DateTime.now();
-    _vehicleArrivalTimes = {
-      for (final entry in widget.vehicleArrivalMinutes.entries)
-        entry.key: entry.value != null
-            ? _scenarioStart.add(Duration(minutes: entry.value!))
-            : null,
-    };
+    startScenarioSession(widget.vehicleArrivalMinutes);
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!_isPaused) {
-        setState(() {
-          _elapsedSeconds++;
-        });
-      }
+      if (!isPaused) setState(() {});
     });
 
     // Check for vehicle arrivals every second
     _arrivalCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _checkVehicleArrivals();
+      checkVehicleArrivals();
     });
 
-    finishVehicles();
+    logRequestedVehicles(widget.vehicleStatus, completedActions);
   }
 
   @override
@@ -136,218 +113,60 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
     super.dispose();
   }
 
-  void _checkVehicleArrivals() {
-    final now = DateTime.now();
-    _vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
-      if (arrivalTime != null &&
-          !_arrivedVehicles.contains(vehicle) &&
-          now.isAfter(arrivalTime)) {
-        _arrivedVehicles.add(vehicle);
-        _showVehicleArrivalDialog(vehicle);
-      }
-    });
-  }
-
-  void _showVehicleArrivalDialog(String vehicle) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.local_shipping, color: Colors.blue.shade700, size: 32),
-            const SizedBox(width: 12),
-            const Text('Rettungsmittel eingetroffen!'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.shade200, width: 2),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.check_circle,
-                      color: Colors.green.shade700, size: 48),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          vehicle,
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green.shade900,
-                          ),
-                        ),
-                        const Text(
-                          'ist eingetroffen!',
-                          style: TextStyle(fontSize: 16),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Verstanden'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> generatePDF() async {
-    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
-      completedActions,
-      widget.userQualification,
-    );
+    final missingActions = _missingActions();
     await PdfService.generateNormalPdf(
       completedActions: completedActions,
       missingActions: missingActions,
       userQualification: widget.userQualification,
-      elapsedSeconds: _elapsedSeconds,
+      elapsedSeconds: elapsedSeconds,
+      scenarioName: widget.scenario?.name,
     );
   }
 
-  void _showMedicalSourcesDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Hinweis & Quellen'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Diese App stellt ausschließlich Fallbeispiele und '
-                    'Trainingsschemata für Ausbildung und Fortbildung im Rettungsdienst dar. '
-                    'Sie ersetzt keine medizinische Beratung, Diagnostik oder Therapieempfehlung.',
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Die hier dargestellten Schemata (z. B. (c)ABCDE, SAMPLER, '
-                    'OPQRST, BE-FAST, WASB, STU, A–E, Maßnahmen) orientieren sich u. a. an:',
-              ),
-              const SizedBox(height: 8),
-              _buildReferenceEntry(
-                'Drache D, Conrad A, Brand A, Frenzel J, Kaiserauer E. '
-                    '„retten – Rettungssanitäter". Georg Thieme Verlag; 2024. '
-                    'Online: https://shop.thieme.de/retten-Rettungssanitaeter/9783132434684',
-              ),
-              const SizedBox(height: 4),
-              _buildReferenceEntry(
-                'Buschmann C (Hrsg.). „Das ABCDE-Schema der Patientensicherheit '
-                    'in der Notfallmedizin – Pearls and Pitfalls aus interdisziplinärer Sicht". '
-                    'Kohlhammer Verlag.',
-              ),
-              const SizedBox(height: 4),
-              _buildReferenceEntry(
-                'European Resuscitation Council (ERC). „ERC Guidelines 2025 / '
-                    '2021 – Basic Life Support & Advanced Life Support". '
-                    'Online: https://www.erc.edu',
-              ),
-              const SizedBox(height: 4),
-              _buildReferenceEntry(
-                'Thieme via medici – notfallmedizinische Basisdiagnostik mit '
-                    '(c)ABCDE- und SAMPLER-Schema.',
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Die Umsetzung im Rahmen dieser App dient ausschließlich dem '
-                    'strukturierten Training von Einsatzkräften.',
-                style: TextStyle(fontStyle: FontStyle.italic),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Schließen'),
-          ),
-        ],
-      ),
-    );
-  }
+  void _confirmEnd({bool fromBack = false}) => showEndScenarioDialog(
+        context,
+        fromBack: fromBack,
+        onEnd: _endScenario,
+        onDiscard: _discardScenario,
+      );
 
-  static Widget _buildReferenceEntry(String text) {
-    return Text(
-      '• $text',
-      style: const TextStyle(fontSize: 13),
-    );
-  }
-
-  void _showEndScenarioDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.stop_circle, color: Colors.red),
-            SizedBox(width: 12),
-            Text('Fallbeispiel beenden?'),
-          ],
-        ),
-        content: const Text(
-          'Alle Timer werden gestoppt und das Ergebnis angezeigt.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Abbrechen'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _endScenario();
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text(
-              'Beenden',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
+  /// Verlässt das Szenario ohne Speichern (nur nach Rückfrage).
+  void _discardScenario() {
+    if (ended) return;
+    ended = true;
+    _timer.cancel();
+    _arrivalCheckTimer.cancel();
+    Navigator.of(context).pop();
   }
 
   Future<void> _endScenario() async {
+    if (ended) return;
+    ended = true;
     _timer.cancel();
     _arrivalCheckTimer.cancel();
-    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
-      completedActions,
-      widget.userQualification,
-    );
+    clock.stop();
+    final missingActions = _missingActions();
 
     // Auto-save session to history
     final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
     final record = SessionRecord(
       id: sessionId,
-      startTime: _scenarioStart,
-      durationSeconds: _elapsedSeconds,
+      startTime: scenarioStart,
+      durationSeconds: elapsedSeconds,
       qualification: widget.userQualification.name,
       isResuscitation: false,
       completedCount: completedActions.length,
       missingCount: missingActions.length,
-      scenarioName: widget.scenarioName,
+      requiredCompletedCount: MeasureRequirements.countCompletedRequiredActions(
+        completedActions,
+        widget.userQualification,
+        onlySchemas: _scoredSchemas,
+      ),
+      scenarioName: widget.scenario?.name,
+      completedActions: List.of(completedActions),
+      missingActions: missingActions,
+      scoredSchemas: _scoredSchemas?.toList(),
     );
     await HistoryService.saveSession(record);
 
@@ -359,135 +178,9 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           missingActions: missingActions,
           userQualification: widget.userQualification,
           sessionId: sessionId,
-          scenarioName: widget.scenarioName,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVehicleArrivalCard() {
-    // Filter vehicles that are coming and have arrival times
-    final incomingVehicles = widget.vehicleStatus.entries
-        .where((e) =>
-            e.value == VehicleStatus.kommt &&
-            _vehicleArrivalTimes[e.key] != null)
-        .toList();
-
-    if (incomingVehicles.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          gradient: LinearGradient(
-            colors: [Colors.orange.shade50, Colors.red.shade50],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.local_shipping, color: Colors.orange.shade700),
-                const SizedBox(width: 8),
-                const Text(
-                  'Ankommende Rettungsmittel',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            ...incomingVehicles.map((entry) {
-              final vehicle = entry.key;
-              final arrivalTime = _vehicleArrivalTimes[vehicle]!;
-              final now = DateTime.now();
-              final diff = arrivalTime.difference(now);
-              final hasArrived = _arrivedVehicles.contains(vehicle);
-
-              String timeText;
-              Color statusColor;
-              IconData statusIcon;
-
-              if (hasArrived) {
-                timeText = 'Eingetroffen!';
-                statusColor = Colors.green;
-                statusIcon = Icons.check_circle;
-              } else if (diff.isNegative) {
-                timeText = 'Ankunft!';
-                statusColor = Colors.green;
-                statusIcon = Icons.notifications_active;
-              } else {
-                final minutes = diff.inMinutes;
-                final seconds = diff.inSeconds % 60;
-                timeText = '${minutes}:${seconds.toString().padLeft(2, '0')} min';
-                statusColor = diff.inMinutes <= 2 ? Colors.orange : Colors.blue;
-                statusIcon = Icons.access_time;
-              }
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: statusColor,
-                    width: hasArrived ? 2 : 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(statusIcon, color: statusColor),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              vehicle,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                            if (!hasArrived && !diff.isNegative)
-                              Text(
-                                'Erwartet um ${arrivalTime.hour.toString().padLeft(2, '0')}:${arrivalTime.minute.toString().padLeft(2, '0')} Uhr',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    Text(
-                      timeText,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: statusColor,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ],
+          scenarioName: widget.scenario?.name,
+          scoredSchemas: _scoredSchemas,
+          durationSeconds: elapsedSeconds,
         ),
       ),
     );
@@ -496,15 +189,19 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     // Calculate missing required actions for this user
-    final missingActions = MeasureRequirements.calculateMissingRequiredActions(
-      completedActions,
-      widget.userQualification,
-    );
+    final missingActions = _missingActions();
 
-    return Scaffold(
+    return PopScope(
+      // Zurück-Taste/-Geste soll ein laufendes Fallbeispiel nicht
+      // kommentarlos verwerfen.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmEnd(fromBack: true);
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(
-            'Schemata – $_formattedTime (${widget.userQualification.name})'),
+            'Schemata – $formattedTime (${widget.userQualification.name})'),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -517,9 +214,9 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
         actions: [
           // Pause/Weiter
           IconButton(
-            icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
-            tooltip: _isPaused ? 'Timer fortsetzen' : 'Timer pausieren',
-            onPressed: () => setState(() => _isPaused = !_isPaused),
+            icon: Icon(isPaused ? Icons.play_arrow : Icons.pause),
+            tooltip: isPaused ? 'Timer fortsetzen' : 'Timer pausieren',
+            onPressed: togglePause,
           ),
           // Alle Expand / Collapse
           IconButton(
@@ -553,6 +250,8 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
                     completedActions: completedActions,
                     missingActions: missingActions,
                     userQualification: widget.userQualification,
+                    scenarioName: widget.scenario?.name,
+                    scoredSchemas: _scoredSchemas,
                   );
                 }),
               );
@@ -566,12 +265,19 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
           IconButton(
             icon: const Icon(Icons.info_outline),
             tooltip: 'Hinweise & Quellen',
-            onPressed: _showMedicalSourcesDialog,
+            onPressed: () => showMedicalSourcesDialog(
+              context,
+              schemaSummary:
+                  '(c)ABCDE, SAMPLER, OPQRST, BE-FAST, WASB, STU, A–E, Maßnahmen',
+              lastReference:
+                  'Thieme via medici – notfallmedizinische Basisdiagnostik mit '
+                  '(c)ABCDE- und SAMPLER-Schema.',
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.stop_circle, color: Colors.white),
             tooltip: 'Fallbeispiel beenden',
-            onPressed: _showEndScenarioDialog,
+            onPressed: _confirmEnd,
           ),
         ],
       ),
@@ -579,8 +285,9 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
         children: [
           // Gesamtfortschrittsbalken
           _buildProgressBar(),
+          if (widget.scenario != null) _buildScenarioCard(widget.scenario!),
           // Pause-Banner
-          if (_isPaused)
+          if (isPaused)
             Container(
               width: double.infinity,
               color: Colors.amber.shade700,
@@ -629,240 +336,94 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             child: ListView(
         children: [
           // Vehicle arrival status
-          _buildVehicleArrivalCard(),
+          VehicleArrivalCard(
+            vehicleStatus: widget.vehicleStatus,
+            arrivalTimes: vehicleArrivalTimes,
+            arrivedVehicles: arrivedVehicles,
+            now: scenarioNow,
+          ),
 
-          ...schemas.keys.where((schema) {
+          ColumnFlow(
+            columns: schemaColumnCount(MediaQuery.sizeOf(context).width),
+            children: _orderedSchemas.where((schema) {
             if (_searchQuery.isEmpty) return true;
             final q = _searchQuery.toLowerCase();
             return schema.toLowerCase().contains(q) ||
                 (schemas[schema] ?? [])
                     .any((a) => a.toLowerCase().contains(q));
-          }).map((schema) {
-            final schemaColor = getSchemaColor(schema);
-            final schemaBg = getSchemaBackgroundColor(schema);
-            bool allCompleted = schemas[schema]!.every((action) {
-              final req = MeasureRequirements.getRequirement(schema, action);
-              if (req != null &&
-                  req.getRequirementLevel(widget.userQualification) ==
-                      RequirementLevel.notApplicable) return true;
-              return completedActions
-                  .any((e) => e.schema == schema && e.action == action);
-            });
-
-            final schemaIcon = getSchemaIcon(schema);
-
-            return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              elevation: allCompleted ? 4 : 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(
-                  color: allCompleted ? Colors.green : schemaColor.withOpacity(0.4),
-                  width: allCompleted ? 2 : 1.5,
-                ),
-              ),
-              child: Theme(
-                data: Theme.of(context).copyWith(
-                  dividerColor: Colors.transparent,
-                ),
-                child: ExpansionTile(
-                  key: ValueKey('$schema-$_allExpanded'),
-                  initiallyExpanded: _allExpanded,
-                  leading: Tooltip(
-                    message: getSchemaDescription(schema),
-                    preferBelow: true,
-                    triggerMode: TooltipTriggerMode.tap,
-                    showDuration: const Duration(seconds: 6),
-                    child: Icon(
-                      schemaIcon,
-                      color: allCompleted ? Colors.green : schemaColor,
-                    ),
-                  ),
-                  title: Text(
-                    schema,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: allCompleted ? Colors.green : schemaColor,
-                    ),
-                  ),
-                  trailing: allCompleted
-                      ? const Icon(Icons.check_circle, color: Colors.green)
-                      : Icon(Icons.expand_more, color: schemaColor),
-                  backgroundColor:
-                      allCompleted ? Colors.green.withOpacity(0.08) : schemaBg,
-                  collapsedBackgroundColor: schemaBg,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  collapsedShape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  children: schemas[schema]!.map((action) {
-                    bool isCompleted = completedActions
-                        .any((e) => e.schema == schema && e.action == action);
-                    final completedEntry = isCompleted
-                        ? completedActions.lastWhere(
-                            (e) => e.schema == schema && e.action == action)
-                        : null;
-
-                    // Get requirement info
-                    final requirement =
-                        MeasureRequirements.getRequirement(schema, action);
-                    final isOptional =
-                        requirement?.isOptionalFor(widget.userQualification) ??
-                            false;
-                    final canPerform = requirement
-                            ?.canPerformWithQualification(
-                                widget.userQualification) ??
-                        true;
-                    final requirementLevel =
-                        requirement?.getRequirementLevel(widget.userQualification);
-
-                    return Container(
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        color: isCompleted
-                            ? Colors.green.withOpacity(0.12)
-                            : (isOptional
-                                ? Colors.blue.withOpacity(0.06)
-                                : null),
-                        border: isCompleted
-                            ? Border.all(
-                                color: Colors.green.withOpacity(0.4), width: 1)
-                            : (isOptional && !isCompleted
-                                ? Border.all(
-                                    color: Colors.blue.shade300, width: 1.5)
-                                : null),
-                      ),
-                      child: ListTile(
-                        dense: true,
-                        leading: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              isCompleted
-                                  ? Icons.check_circle
-                                  : Icons.radio_button_unchecked,
-                              color: isCompleted
-                                  ? Colors.green
-                                  : (isOptional
-                                      ? Colors.blue
-                                      : Colors.grey),
-                            ),
-                            if (isOptional && !isCompleted) ...[
-                              const SizedBox(width: 4),
-                              Icon(Icons.help_outline,
-                                  color: Colors.blue.shade600, size: 14),
-                            ],
-                            if (!canPerform) ...[
-                              const SizedBox(width: 4),
-                              Icon(Icons.lock,
-                                  color: Colors.orange.shade700, size: 14),
-                            ],
-                            if (isCompleted) ...[
-                              const SizedBox(width: 4),
-                              Icon(Icons.undo,
-                                  color: Colors.green.withOpacity(0.5),
-                                  size: 12),
-                            ],
-                          ],
-                        ),
-                        title: Text(
-                          action,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isCompleted
-                                ? Colors.green.shade800
-                                : (!canPerform
-                                    ? Colors.grey.shade500
-                                    : null),
-                            fontWeight: isCompleted
-                                ? FontWeight.w500
-                                : FontWeight.normal,
-                            decoration: !canPerform
-                                ? TextDecoration.lineThrough
-                                : null,
-                          ),
-                        ),
-                        subtitle: isCompleted && completedEntry != null
-                            ? Text(
-                                _relativeTime(completedEntry.timestamp),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.green.shade600,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              )
-                            : (!canPerform
-                                ? Text(
-                                    'Nicht verfügbar für ${widget.userQualification.name}',
-                                    style: TextStyle(
-                                      color: Colors.orange.shade700,
-                                      fontSize: 11,
-                                    ),
-                                  )
-                                : (isOptional
-                                    ? Text(
-                                        requirementLevel ==
-                                                RequirementLevel.expected
-                                            ? 'Erwartet'
-                                            : 'Optional',
-                                        style: TextStyle(
-                                          color: requirementLevel ==
-                                                  RequirementLevel.expected
-                                              ? Colors.amber.shade700
-                                              : Colors.blue.shade700,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      )
-                                    : null)),
-                        onTap: canPerform && !isCompleted
-                            ? () {
-                                setState(() {
-                                  completedActions.add(CompletedAction(
-                                    schema: schema,
-                                    action: action,
-                                    timestamp: DateTime.now(),
-                                  ));
-                                });
-                              }
-                            : null,
-                        onLongPress: isCompleted
-                            ? () {
-                                setState(() {
-                                  completedActions.removeWhere((e) =>
-                                      e.schema == schema &&
-                                      e.action == action);
-                                });
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content:
-                                        Text('"$action" rückgängig gemacht'),
-                                    duration: const Duration(seconds: 2),
-                                    backgroundColor: Colors.orange,
-                                  ),
-                                );
-                              }
-                            : null,
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            );
-          }).toList(),
+          }).map((schema) => SchemaCard(
+                schema: schema,
+                actions: schemas[schema]!,
+                completedActions: completedActions,
+                qualification: widget.userQualification,
+                expanded: _allExpanded,
+                unscoredHint: _isScored(schema)
+                    ? null
+                    : 'Nicht bewertet in diesem Szenario',
+                formatTimestamp: relativeTime,
+                onComplete: (action) => setState(() {
+                  completedActions.add(CompletedAction(
+                    schema: schema,
+                    action: action,
+                    timestamp: scenarioNow,
+                  ));
+                }),
+                onUndo: (action) => setState(() {
+                  completedActions.removeWhere(
+                      (e) => e.schema == schema && e.action == action);
+                }),
+              )).toList(),
+          ),
               const SizedBox(height: 20), // Bottom padding
             ],
           ),
           ),
         ],
       ),
+    ),
+    );
+  }
+
+  /// Fallbild des gewählten Szenarios – einklappbar, damit es während des
+  /// Trainings nachgelesen werden kann, ohne Platz zu blockieren.
+  Widget _buildScenarioCard(PredefinedScenario scenario) {
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: scenario.color.withAlpha(100), width: 1.5),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          leading: Icon(scenario.icon, color: scenario.color),
+          title: Text(
+            scenario.name,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          subtitle: Text(
+            'Fallbild anzeigen',
+            style: TextStyle(fontSize: 12, color: context.mutedText),
+          ),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(scenario.clinicalPicture),
+            if (scenario.extraSchemas.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Zusätzlich bewertet: ${scenario.extraSchemas.join(', ')}',
+                style: TextStyle(fontSize: 12, color: context.mutedText),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
   Widget _buildProgressBar() {
-    final total = schemas.keys.length;
+    final total = _progressSchemas.length;
     final done = _completedSchemaCount;
     final progress = total > 0 ? done / total : 0.0;
     final color = progress >= 1.0
@@ -898,7 +459,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen> {
             child: LinearProgressIndicator(
               value: progress,
               minHeight: 8,
-              backgroundColor: Colors.grey.shade300,
+              backgroundColor: context.trackBg,
               valueColor: AlwaysStoppedAnimation<Color>(color),
             ),
           ),

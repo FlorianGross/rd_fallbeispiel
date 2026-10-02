@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,19 +7,22 @@ import 'package:rd_fallbeispiel/Screens/result_screen.dart';
 
 import '../main.dart';
 import '../measure_requirements.dart';
+import '../models/cpr_summary.dart';
+import '../models/scenario.dart';
 import '../models/session_record.dart';
 import '../services/history_service.dart';
 import '../services/pdf_service.dart';
-import '../utils/schema_colors.dart';
-import '../utils/schema_descriptions.dart';
-import '../utils/schema_icons.dart';
+import '../utils/adaptive_colors.dart';
+import '../widgets/responsive.dart';
+import '../widgets/scenario_common.dart';
+import 'scenario_session.dart';
 
 class ResuscitationScreen extends StatefulWidget {
   final Map<String, VehicleStatus> vehicleStatus;
   final bool isChildResuscitation;
   final Map<String, int?> vehicleArrivalMinutes;
   final Qualification userQualification;
-  final String? scenarioName;
+  final PredefinedScenario? scenario;
 
   const ResuscitationScreen({
     super.key,
@@ -26,7 +30,7 @@ class ResuscitationScreen extends StatefulWidget {
     required this.isChildResuscitation,
     required this.vehicleArrivalMinutes,
     required this.userQualification,
-    this.scenarioName,
+    this.scenario,
   });
 
   @override
@@ -34,7 +38,7 @@ class ResuscitationScreen extends StatefulWidget {
 }
 
 class _ResuscitationScreenState extends State<ResuscitationScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, ScenarioSessionMixin {
   Map<String, List<String>> get schemas {
     Map<String, List<String>> result = {};
     MeasureRequirements.requirements.forEach((schema, requirements) {
@@ -43,9 +47,17 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     return result;
   }
 
+  bool _isScored(String schema) =>
+      MeasureRequirements.resuscitationSchemas.contains(schema);
+
   // BPM Functionality
   final List<DateTime> _tapTimestamps = [];
   double _smoothedBPM = 0;
+
+  /// Längere Lücke zwischen zwei Kompressionen = Unterbrechung (Beatmung,
+  /// Rhythmusanalyse, Helferwechsel). Die Frequenz wird dann neu gemessen,
+  /// statt die Pause als langsame Kompression zu werten.
+  static const Duration _maxCompressionGap = Duration(milliseconds: 2000);
 
   // BPM History tracking for graph
   List<Map<String, dynamic>> _bpmHistory = [];
@@ -85,12 +97,16 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     }
 
     final now = DateTime.now();
-    resuscitationStart ??= now;
+    _markResuscitationStart(now);
 
     // Haptic feedback
     HapticFeedback.lightImpact();
 
     setState(() {
+      if (_tapTimestamps.isNotEmpty &&
+          now.difference(_tapTimestamps.last) > _maxCompressionGap) {
+        _resetBpmMeasurement();
+      }
       _tapTimestamps.add(now);
       if (_tapTimestamps.length > 5) {
         _tapTimestamps.removeAt(0);
@@ -115,10 +131,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   }
 
   void _registerVentilation() {
-    if (resuscitationStart == null) {
-      // Start resuscitation with first ventilation for children
-      resuscitationStart = DateTime.now();
-    }
+    // Start resuscitation with first ventilation for children
+    _markResuscitationStart(DateTime.now());
 
     // Haptic feedback
     HapticFeedback.mediumImpact();
@@ -127,6 +141,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
     setState(() {
       _ventilationCount++;
+      // Beatmungspause nicht in die Kompressionsfrequenz einrechnen
+      _resetBpmMeasurement();
 
       // Record ventilation history for graph
       _ventilationHistory.add({
@@ -147,6 +163,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
       // Trigger ventilation animation
       _ventilationController.forward(from: 0);
     });
+  }
+
+  void _resetBpmMeasurement() {
+    _tapTimestamps.clear();
+    _smoothedBPM = 0;
   }
 
   void _calculateSmoothedBPM() {
@@ -185,84 +206,62 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   List<CompletedAction> completedActions = [];
   late Timer _timer;
   late Timer _arrivalCheckTimer;
-  int _elapsedSeconds = 0;
-  bool _isPaused = false;
   bool _allExpanded = false;
   DateTime? resuscitationStart;
-  late final Map<String, DateTime?> _vehicleArrivalTimes;
 
   // AED / Rhythmuskontrolle
-  int _lastRhythmCheckSeconds = 0;
-  bool _rhythmCheckDue = false;
+  /// Stand der Szenario-Uhr beim Reanimationsbeginn
+  Duration? _reaniStartOffset;
+  int _lastRhythmCycle = 0;
 
-  // Track which vehicles have shown arrival notification
-  Set<String> _arrivedVehicles = {};
 
-  String get _formattedTime {
-    final m = _elapsedSeconds ~/ 60;
-    final s = _elapsedSeconds % 60;
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-  }
+  /// Reanimationsdauer auf der Szenario-Uhr (ohne Pausen)
+  Duration get _reaniElapsed => _reaniStartOffset == null
+      ? Duration.zero
+      : clock.elapsed - _reaniStartOffset!;
 
-  // Set selectedVehicles to be finished
-  void finishVehicles() {
-    setState(() {
-      widget.vehicleStatus.forEach((key, value) {
-        if (value == VehicleStatus.kommt &&
-            !completedActions.any(
-                (e) => e.schema == 'Nachforderung' && e.action == key)) {
-          completedActions.add(CompletedAction(
-            schema: 'Nachforderung',
-            action: key,
-            timestamp: DateTime.now(),
-          ));
-        }
-      });
-    });
+  void _markResuscitationStart(DateTime now) {
+    if (resuscitationStart != null) return;
+    resuscitationStart = now;
+    _reaniStartOffset = clock.elapsed;
   }
 
   @override
   void initState() {
     super.initState();
 
-    // Ankunftszeiten werden ab Szenario-Start berechnet (nicht ab Setup)
-    final scenarioStart = DateTime.now();
-    _vehicleArrivalTimes = {
-      for (final entry in widget.vehicleArrivalMinutes.entries)
-        entry.key: entry.value != null
-            ? scenarioStart.add(Duration(minutes: entry.value!))
-            : null,
-    };
+    startScenarioSession(widget.vehicleArrivalMinutes);
 
     // Set ratio based on child/adult resuscitation
     _targetCompressionRatio = widget.isChildResuscitation ? 15 : 30;
     _targetVentilationRatio = 2;
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_isPaused) return;
+      if (isPaused) return;
       setState(() {
-        _elapsedSeconds++;
-        // AED-Rhythmuskontrolle: alle 2 min nach Reanimationsstart erinnern
-        if (resuscitationStart != null) {
-          final reaniSec =
-              DateTime.now().difference(resuscitationStart!).inSeconds;
-          if (reaniSec > 0 &&
-              reaniSec % 120 == 0 &&
-              reaniSec != _lastRhythmCheckSeconds) {
-            _lastRhythmCheckSeconds = reaniSec;
-            _rhythmCheckDue = true;
-          }
+        // Ohne weitere Kompressionen soll keine veraltete (grüne) Frequenz
+        // stehen bleiben.
+        if (_tapTimestamps.isNotEmpty &&
+            DateTime.now().difference(_tapTimestamps.last) >
+                _maxCompressionGap) {
+          _resetBpmMeasurement();
         }
       });
-      if (_rhythmCheckDue) {
-        _rhythmCheckDue = false;
-        _showRhythmCheckReminder();
+      // AED-Rhythmuskontrolle: alle 2 min nach Reanimationsstart erinnern.
+      // Vergleich über den 2-min-Zyklus statt `% 120 == 0`, damit ein
+      // verspäteter Timer-Tick (z. B. 119 → 121 s) keine Erinnerung verschluckt.
+      if (_reaniStartOffset != null) {
+        final cycle = _reaniElapsed.inSeconds ~/ 120;
+        if (cycle > _lastRhythmCycle) {
+          _lastRhythmCycle = cycle;
+          _showRhythmCheckReminder();
+        }
       }
     });
 
     // Check for vehicle arrivals every second
     _arrivalCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _checkVehicleArrivals();
+      checkVehicleArrivals();
     });
 
     // Initialize animations
@@ -284,75 +283,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
       CurvedAnimation(parent: _ventilationController, curve: Curves.easeInOut),
     );
 
-    finishVehicles();
-  }
-
-  void _checkVehicleArrivals() {
-    final now = DateTime.now();
-    _vehicleArrivalTimes.forEach((vehicle, arrivalTime) {
-      if (arrivalTime != null &&
-          !_arrivedVehicles.contains(vehicle) &&
-          now.isAfter(arrivalTime)) {
-        _arrivedVehicles.add(vehicle);
-        _showVehicleArrivalDialog(vehicle);
-      }
-    });
-  }
-
-  void _showVehicleArrivalDialog(String vehicle) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.local_shipping, color: Colors.blue.shade700, size: 32),
-            const SizedBox(width: 12),
-            const Text('Rettungsmittel eingetroffen!'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue, width: 2),
-              ),
-              child: Text(
-                vehicle,
-                style: const TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue,
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'ist am Einsatzort angekommen.',
-              style: TextStyle(fontSize: 16),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
-            child: const Text(
-              'Verstanden',
-              style: TextStyle(fontSize: 16, color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
+    logRequestedVehicles(widget.vehicleStatus, completedActions);
   }
 
   @override
@@ -368,6 +299,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     final missingActions = MeasureRequirements.calculateMissingRequiredActions(
       completedActions,
       widget.userQualification,
+      onlySchemas: MeasureRequirements.resuscitationSchemas,
     );
     await PdfService.generateResuscitationPdf(
       completedActions: completedActions,
@@ -379,78 +311,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
       targetCompressionRatio: _targetCompressionRatio,
       targetVentilationRatio: _targetVentilationRatio,
       resuscitationStart: resuscitationStart,
-      bpm: _bpm,
+      resuscitationDuration: _reaniElapsed,
       bpmHistory: _bpmHistory,
       ventilationHistory: _ventilationHistory,
       vehicleStatus: widget.vehicleStatus,
-    );
-  }
-
-  void _showMedicalSourcesDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Hinweis & Quellen'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Diese App stellt ausschließlich Fallbeispiele und '
-                    'Trainingsschemata für Ausbildung und Fortbildung im Rettungsdienst dar. '
-                    'Sie ersetzt keine medizinische Beratung, Diagnostik oder Therapieempfehlung.',
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Die hier dargestellten Schemata (z. B. SSSS, WASB, (c)ABCDE, '
-                    'SAMPLER, 4H/4T, Maßnahmen der Reanimation) orientieren sich u. a. an:',
-              ),
-              const SizedBox(height: 8),
-              _buildReferenceEntry(
-                'Drache D, Conrad A, Brand A, Frenzel J, Kaiserauer E. '
-                    '„retten – Rettungssanitäter". Georg Thieme Verlag; 2024. '
-                    'Online: https://shop.thieme.de/retten-Rettungssanitaeter/9783132434684',
-              ),
-              const SizedBox(height: 4),
-              _buildReferenceEntry(
-                'Buschmann C (Hrsg.). „Das ABCDE-Schema der Patientensicherheit '
-                    'in der Notfallmedizin – Pearls and Pitfalls aus interdisziplinärer Sicht". '
-                    'Kohlhammer Verlag.',
-              ),
-              const SizedBox(height: 4),
-              _buildReferenceEntry(
-                'European Resuscitation Council (ERC). „ERC Guidelines 2025 / '
-                    '2021 – Basic Life Support & Advanced Life Support". '
-                    'Online: https://www.erc.edu',
-              ),
-              const SizedBox(height: 4),
-              _buildReferenceEntry(
-                'Thieme via medici / notfallmedizinische Basisdiagnostik '
-                    'mit (c)ABCDE- und SAMPLER-Schema.',
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Die Umsetzung im Rahmen dieser App dient ausschließlich dem '
-                    'strukturieren Training von Einsatzkräften.',
-                style: TextStyle(fontStyle: FontStyle.italic),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Schließen'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static Widget _buildReferenceEntry(String text) {
-    return Text(
-      '• $text',
-      style: const TextStyle(fontSize: 13),
+      scenarioName: widget.scenario?.name,
     );
   }
 
@@ -578,63 +443,62 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     );
   }
 
-  void _showEndScenarioDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.stop_circle, color: Colors.red),
-            SizedBox(width: 12),
-            Text('Fallbeispiel beenden?'),
-          ],
-        ),
-        content: const Text(
-          'Alle Timer werden gestoppt und das Ergebnis angezeigt.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Abbrechen'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _endScenario();
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text(
-              'Beenden',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
+  void _confirmEnd({bool fromBack = false}) => showEndScenarioDialog(
+        context,
+        fromBack: fromBack,
+        onEnd: _endScenario,
+        onDiscard: _discardScenario,
+      );
+
+  /// Verlässt das Szenario ohne Speichern (nur nach Rückfrage).
+  void _discardScenario() {
+    if (ended) return;
+    ended = true;
+    _timer.cancel();
+    _arrivalCheckTimer.cancel();
+    Navigator.of(context).pop();
   }
 
   Future<void> _endScenario() async {
+    if (ended) return;
+    ended = true;
     _timer.cancel();
     _arrivalCheckTimer.cancel();
+    clock.stop();
+    // Bei der Reanimation werden nur CPR-relevante Schemata bewertet –
+    // SAMPLERS, OPQRST, STU usw. sind während einer CPR nicht zu erwarten.
     final missingActions = MeasureRequirements.calculateMissingRequiredActions(
       completedActions,
       widget.userQualification,
+      onlySchemas: MeasureRequirements.resuscitationSchemas,
     );
 
     // Auto-save session to history
-    final scenarioStart =
-        resuscitationStart ?? DateTime.now().subtract(Duration(seconds: _elapsedSeconds));
     final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
     final record = SessionRecord(
       id: sessionId,
+      // Start = Öffnen des Szenarios, passend zu durationSeconds
       startTime: scenarioStart,
-      durationSeconds: _elapsedSeconds,
+      durationSeconds: elapsedSeconds,
       qualification: widget.userQualification.name,
       isResuscitation: true,
       isChildResuscitation: widget.isChildResuscitation,
       completedCount: completedActions.length,
       missingCount: missingActions.length,
-      scenarioName: widget.scenarioName,
+      requiredCompletedCount: MeasureRequirements.countCompletedRequiredActions(
+        completedActions,
+        widget.userQualification,
+        onlySchemas: MeasureRequirements.resuscitationSchemas,
+      ),
+      scenarioName: widget.scenario?.name,
+      completedActions: List.of(completedActions),
+      missingActions: missingActions,
+      scoredSchemas: MeasureRequirements.resuscitationSchemas.toList(),
+      cpr: CprSummary.fromHistory(
+        compressions: _compressionCount,
+        ventilations: _ventilationCount,
+        bpmHistory: _bpmHistory,
+      ),
     );
     await HistoryService.saveSession(record);
 
@@ -651,7 +515,9 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           ventilationCount: _ventilationCount,
           resuscitationStart: resuscitationStart,
           sessionId: sessionId,
-          scenarioName: widget.scenarioName,
+          scenarioName: widget.scenario?.name,
+          scoredSchemas: MeasureRequirements.resuscitationSchemas,
+          durationSeconds: elapsedSeconds,
         ),
       ),
     );
@@ -666,7 +532,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           gradient: LinearGradient(
-            colors: [Colors.red.shade50, Colors.blue.shade50],
+            colors: [context.softBg(Colors.red), context.softBg(Colors.blue)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -680,7 +546,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                 margin: const EdgeInsets.only(bottom: 16),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.orange.shade100,
+                  color: context.softBg(Colors.orange),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Colors.orange, width: 2),
                 ),
@@ -740,7 +606,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                       'BPM (Ziel: 100-120)',
                       style: TextStyle(
                         fontSize: 14,
-                        color: Colors.grey.shade700,
+                        color: context.mutedText,
                       ),
                     ),
                   ],
@@ -755,17 +621,22 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _buildStatCard(
-                  icon: Icons.compress,
-                  label: 'Kompressionen',
-                  value: '$_compressionCount',
-                  color: Colors.red,
+                Flexible(
+                  child: _buildStatCard(
+                    icon: Icons.compress,
+                    label: 'Kompressionen',
+                    value: '$_compressionCount',
+                    color: Colors.red,
+                  ),
                 ),
-                _buildStatCard(
-                  icon: Icons.air,
-                  label: 'Beatmungen',
-                  value: '$_ventilationCount',
-                  color: Colors.blue,
+                const SizedBox(width: 8),
+                Flexible(
+                  child: _buildStatCard(
+                    icon: Icons.air,
+                    label: 'Beatmungen',
+                    value: '$_ventilationCount',
+                    color: Colors.blue,
+                  ),
                 ),
               ],
             ),
@@ -779,9 +650,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Bis zur Beatmung: ${_targetCompressionRatio - _cycleCompressions} Kompressionen',
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                      Flexible(
+                        child: Text(
+                          'Bis zur Beatmung: ${_targetCompressionRatio - _cycleCompressions} Kompressionen',
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                        ),
                       ),
                       IconButton(
                         icon: const Icon(Icons.edit, size: 20),
@@ -795,7 +668,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   const SizedBox(height: 6),
                   LinearProgressIndicator(
                     value: _cycleCompressions / _targetCompressionRatio,
-                    backgroundColor: Colors.grey.shade300,
+                    backgroundColor: context.trackBg,
                     valueColor: AlwaysStoppedAnimation<Color>(
                       _cycleCompressions >= _targetCompressionRatio
                           ? Colors.orange
@@ -806,7 +679,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   const SizedBox(height: 4),
                   Text(
                     'Verhältnis: $_targetCompressionRatio:$_targetVentilationRatio ${_targetCompressionRatio == 10 && _targetVentilationRatio == 1 ? "(Asynchron - Intubiert)" : widget.isChildResuscitation ? "(Kind)" : "(Erwachsener)"}',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    style: TextStyle(fontSize: 12, color: context.mutedText),
                   ),
                 ],
               ),
@@ -817,7 +690,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.amber.shade100,
+                  color: context.softBg(Colors.amber),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -825,11 +698,13 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   children: [
                     const Icon(Icons.timer, size: 20, color: Colors.amber),
                     const SizedBox(width: 8),
-                    Text(
-                      'Reanimation seit: ${DateTime.now().difference(resuscitationStart!).inMinutes}:${(DateTime.now().difference(resuscitationStart!).inSeconds % 60).toString().padLeft(2, '0')} min',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                    Flexible(
+                      child: Text(
+                        'Reanimation seit: ${_reaniElapsed.inMinutes}:${(_reaniElapsed.inSeconds % 60).toString().padLeft(2, '0')} min',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],
@@ -870,7 +745,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             label,
             style: TextStyle(
               fontSize: 12,
-              color: Colors.grey.shade700,
+              color: context.mutedText,
             ),
           ),
         ],
@@ -878,139 +753,269 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     );
   }
 
-  Widget _buildVehicleArrivalCard() {
-    // Filter vehicles that are coming and have arrival times
-    final incomingVehicles = widget.vehicleStatus.entries
-        .where((e) =>
-            e.value == VehicleStatus.kommt &&
-            _vehicleArrivalTimes[e.key] != null)
-        .toList();
+  static const double _cprPanelWidth = 380;
+  static const double _compactCprPanelWidth = 280;
 
-    if (incomingVehicles.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          gradient: LinearGradient(
-            colors: [Colors.orange.shade50, Colors.red.shade50],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+  /// Pause-Banner und ankommende Rettungsmittel über der Schema-Liste.
+  List<Widget> _buildStatusSection() {
+    return [
+      if (isPaused)
+        Container(
+          width: double.infinity,
+          color: Colors.amber.shade700,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.pause_circle, color: Colors.white, size: 18),
+              SizedBox(width: 8),
+              Text('Timer pausiert',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
+            ],
           ),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.local_shipping, color: Colors.orange.shade700),
-                const SizedBox(width: 8),
-                const Text(
-                  'Ankommende Rettungsmittel',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            ...incomingVehicles.map((entry) {
-              final vehicle = entry.key;
-              final arrivalTime = _vehicleArrivalTimes[vehicle]!;
-              final now = DateTime.now();
-              final diff = arrivalTime.difference(now);
-              final hasArrived = _arrivedVehicles.contains(vehicle);
+      VehicleArrivalCard(
+        vehicleStatus: widget.vehicleStatus,
+        arrivalTimes: vehicleArrivalTimes,
+        arrivedVehicles: arrivedVehicles,
+        now: scenarioNow,
+      ),
+    ];
+  }
 
-              String timeText;
-              Color statusColor;
-              IconData statusIcon;
+  /// Schema-Karten, CPR-relevante (bewertete) Schemata zuerst.
+  List<Widget> _buildSchemaCards() {
+    final ordered = [
+      ...schemas.keys.where(_isScored),
+      ...schemas.keys.where((s) => !_isScored(s)),
+    ];
+    return ordered
+        .map((schema) => SchemaCard(
+              schema: schema,
+              actions: schemas[schema]!,
+              completedActions: completedActions,
+              qualification: widget.userQualification,
+              expanded: _allExpanded,
+              unscoredHint: _isScored(schema)
+                  ? null
+                  : 'Nicht bewertet bei der Reanimation',
+              formatTimestamp: relativeTime,
+              onComplete: (action) => setState(() {
+                completedActions.add(CompletedAction(
+                  schema: schema,
+                  action: action,
+                  timestamp: scenarioNow,
+                ));
+              }),
+              onUndo: (action) => setState(() {
+                completedActions.removeWhere(
+                    (e) => e.schema == schema && e.action == action);
+              }),
+            ))
+        .toList();
+  }
 
-              if (hasArrived) {
-                timeText = 'Eingetroffen!';
-                statusColor = Colors.green;
-                statusIcon = Icons.check_circle;
-              } else if (diff.isNegative) {
-                timeText = 'Ankunft!';
-                statusColor = Colors.green;
-                statusIcon = Icons.notifications_active;
-              } else {
-                final minutes = diff.inMinutes;
-                final seconds = diff.inSeconds % 60;
-                timeText = '${minutes}:${seconds.toString().padLeft(2, '0')} min';
-                statusColor = diff.inMinutes <= 2 ? Colors.orange : Colors.blue;
-                statusIcon = Icons.access_time;
-              }
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: statusColor,
-                    width: hasArrived ? 2 : 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(statusIcon, color: statusColor),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              vehicle,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                            if (!hasArrived && !diff.isNegative)
-                              Text(
-                                'Erwartet um ${arrivalTime.hour.toString().padLeft(2, '0')}:${arrivalTime.minute.toString().padLeft(2, '0')} Uhr',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    Text(
-                      timeText,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: statusColor,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ],
+  /// Beatmungs-Taste. Im CPR-Bedienfeld ([inPanel]) als breite Taste über
+  /// die volle Panelbreite, sonst als schwebender Button.
+  Widget _buildVentilationButton({bool inPanel = false, bool compact = false}) {
+    final label = widget.isChildResuscitation && !_initialVentilationsComplete
+        ? 'Initial $_initialVentilationCount/$_requiredInitialVentilations'
+        : (_cycleCompressions >= _targetCompressionRatio
+            ? 'Beatmung!'
+            : 'Beatmung');
+    final color = widget.isChildResuscitation && !_initialVentilationsComplete
+        ? Colors.orange
+        : (_cycleCompressions >= _targetCompressionRatio
+            ? Colors.orange
+            : Colors.blue);
+    // Im Panel ohne Puls-Skalierung: Die breite Taste würde sonst über den
+    // Panelrand hinauswachsen.
+    if (inPanel) {
+      return SizedBox(
+        height: compact ? 52 : 72,
+        child: FilledButton.icon(
+          onPressed: _registerVentilation,
+          style: FilledButton.styleFrom(
+            backgroundColor: color,
+            foregroundColor: Colors.white,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+          icon: const Icon(Icons.air, size: 32),
+          label: Text(label,
+              style:
+                  const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         ),
+      );
+    }
+    return ScaleTransition(
+      scale: _ventilationAnimation,
+      child: FloatingActionButton.extended(
+        heroTag: 'ventilation',
+        onPressed: _registerVentilation,
+        icon: const Icon(Icons.air, size: 32),
+        label: Text(label,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        backgroundColor: color,
+      ),
+    );
+  }
+
+  /// Kompressions-Taste (Frequenzmessung per Antippen). Im CPR-Bedienfeld
+  /// ([inPanel]) als große Fläche, damit sie im Takt sicher getroffen wird.
+  Widget _buildCompressionButton({bool inPanel = false, bool compact = false}) {
+    if (inPanel) {
+      return SizedBox(
+        height: compact ? 96 : 160,
+        child: FilledButton(
+          onPressed: _registerTap,
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.favorite, size: compact ? 40 : 64),
+              const SizedBox(height: 4),
+              const Text('Kompression',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+      );
+    }
+    return ScaleTransition(
+      scale: _pulseAnimation,
+      child: FloatingActionButton.large(
+        heroTag: 'compression',
+        onPressed: _registerTap,
+        backgroundColor: Colors.red,
+        child: const Icon(Icons.favorite, size: 48),
+      ),
+    );
+  }
+
+  /// Festes CPR-Bedienfeld rechts im breiten Layout (Tablet): oben die
+  /// Kennzahlen, unten große Tasten für Kompression und Beatmung. Im
+  /// Querformat auf dem Smartphone ([compact]) mit verdichteten Kennzahlen
+  /// und kleineren Tasten.
+  Widget _buildCprPanel({bool compact = false}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: ListView(
+            children: [
+              if (resuscitationStart == null)
+                Padding(
+                  padding: EdgeInsets.all(compact ? 12 : 24),
+                  child: Text(
+                    widget.isChildResuscitation
+                        ? 'Mit der ersten Initialbeatmung startet die Reanimation.'
+                        : 'Mit der ersten Kompression startet die Reanimation.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: context.mutedText),
+                  ),
+                )
+              else if (compact)
+                _buildCompactCprStats()
+              else
+                _buildReanimationDashboard(),
+            ],
+          ),
+        ),
+        Padding(
+          padding: compact
+              ? const EdgeInsets.fromLTRB(12, 4, 12, 12)
+              : const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildVentilationButton(inPanel: true, compact: compact),
+              SizedBox(height: compact ? 12 : 24),
+              _buildCompressionButton(inPanel: true, compact: compact),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Verdichtete Kennzahlen für das kompakte CPR-Bedienfeld: Frequenz,
+  /// Zähler und Fortschritt bis zur nächsten Beatmung.
+  Widget _buildCompactCprStats() {
+    final initialPhase =
+        widget.isChildResuscitation && !_initialVentilationsComplete;
+    Widget tile(String value, String label, Color color) => Expanded(
+          child: Column(
+            children: [
+              Text(value,
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: color)),
+              Text(label,
+                  style: TextStyle(fontSize: 11, color: context.mutedText)),
+            ],
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              tile(_bpm.toStringAsFixed(0), 'BPM', _getBPMColor()),
+              tile('$_compressionCount', 'Kompr.', Colors.red),
+              tile('$_ventilationCount', 'Beatm.', Colors.blue),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            initialPhase
+                ? 'Initialbeatmungen: $_initialVentilationCount / $_requiredInitialVentilations'
+                : 'Bis zur Beatmung: ${_targetCompressionRatio - _cycleCompressions}',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 4),
+          LinearProgressIndicator(
+            value: initialPhase
+                ? _initialVentilationCount / _requiredInitialVentilations
+                : _cycleCompressions / _targetCompressionRatio,
+            backgroundColor: context.trackBg,
+            valueColor: AlwaysStoppedAnimation<Color>(
+              initialPhase || _cycleCompressions >= _targetCompressionRatio
+                  ? Colors.orange
+                  : Colors.green,
+            ),
+            minHeight: 6,
+          ),
+        ],
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    // Seitliches CPR-Bedienfeld auf Tablets und – kompakt – auf Smartphones
+    // im Querformat, wo die schwebenden Tasten fast die ganze Liste verdecken.
+    final compact = isCompactLandscape(context);
+    final sidePanel = isWideLayout(context) || compact;
+    return PopScope(
+      // Zurück-Taste/-Geste soll eine laufende Reanimation nicht
+      // kommentarlos verwerfen.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmEnd(fromBack: true);
+      },
+      child: Scaffold(
       appBar: AppBar(
-        title: Text('Reanimation – $_formattedTime (${widget.userQualification.name})'),
+        title: Text('Reanimation – $formattedTime (${widget.userQualification.name})'),
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -1023,9 +1028,9 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         actions: [
           // Pause/Weiter
           IconButton(
-            icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
-            tooltip: _isPaused ? 'Timer fortsetzen' : 'Timer pausieren',
-            onPressed: () => setState(() => _isPaused = !_isPaused),
+            icon: Icon(isPaused ? Icons.play_arrow : Icons.pause),
+            tooltip: isPaused ? 'Timer fortsetzen' : 'Timer pausieren',
+            onPressed: togglePause,
           ),
           // Alle Expand / Collapse
           IconButton(
@@ -1058,6 +1063,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   final missingActions = MeasureRequirements.calculateMissingRequiredActions(
                     completedActions,
                     widget.userQualification,
+                    onlySchemas: MeasureRequirements.resuscitationSchemas,
                   );
                   return MeasuresOverviewScreen(
                     completedActions: completedActions,
@@ -1068,6 +1074,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                     compressionCount: _compressionCount,
                     ventilationCount: _ventilationCount,
                     resuscitationStart: resuscitationStart,
+                    scoredSchemas: MeasureRequirements.resuscitationSchemas,
                   );
                 }),
               );
@@ -1081,279 +1088,75 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           IconButton(
             icon: const Icon(Icons.info_outline),
             tooltip: 'Hinweise & Quellen',
-            onPressed: _showMedicalSourcesDialog,
+            onPressed: () => showMedicalSourcesDialog(
+              context,
+              schemaSummary: 'SSSS, WASB, (c)ABCDE, SAMPLER, 4H/4T, '
+                  'Maßnahmen der Reanimation',
+              lastReference:
+                  'Thieme via medici – notfallmedizinische Basisdiagnostik '
+                  'mit (c)ABCDE- und SAMPLER-Schema.',
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.stop_circle, color: Colors.white),
             tooltip: 'Fallbeispiel beenden',
-            onPressed: _showEndScenarioDialog,
+            onPressed: _confirmEnd,
           ),
         ],
       ),
-      body: ListView(
-        children: [
-          if (resuscitationStart != null) _buildReanimationDashboard(),
-
-          // Pause-Banner
-          if (_isPaused)
-            Container(
-              width: double.infinity,
-              color: Colors.amber.shade700,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.pause_circle, color: Colors.white, size: 18),
-                  SizedBox(width: 8),
-                  Text('Timer pausiert',
-                      style: TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-
-          // Vehicle arrival status
-          _buildVehicleArrivalCard(),
-
-          ...schemas.keys.map((schema) {
-            final schemaColor = getSchemaColor(schema);
-            final schemaBg = getSchemaBackgroundColor(schema);
-            bool allCompleted = schemas[schema]!.every((action) {
-              final req = MeasureRequirements.getRequirement(schema, action);
-              if (req != null &&
-                  req.getRequirementLevel(widget.userQualification) ==
-                      RequirementLevel.notApplicable) return true;
-              return completedActions
-                  .any((e) => e.schema == schema && e.action == action);
-            });
-
-            final schemaIcon = getSchemaIcon(schema);
-
-            return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              elevation: allCompleted ? 4 : 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(
-                  color: allCompleted
-                      ? Colors.green
-                      : schemaColor.withOpacity(0.4),
-                  width: allCompleted ? 2 : 1.5,
-                ),
-              ),
-              child: Theme(
-                data: Theme.of(context).copyWith(
-                  dividerColor: Colors.transparent,
-                ),
-                child: ExpansionTile(
-                  key: ValueKey('$schema-$_allExpanded'),
-                  initiallyExpanded: _allExpanded,
-                  leading: Tooltip(
-                    message: getSchemaDescription(schema),
-                    preferBelow: true,
-                    triggerMode: TooltipTriggerMode.tap,
-                    showDuration: const Duration(seconds: 6),
-                    child: Icon(
-                      schemaIcon,
-                      color: allCompleted ? Colors.green : schemaColor,
-                    ),
-                  ),
-                  title: Text(
-                    schema,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: allCompleted ? Colors.green : schemaColor,
-                    ),
-                  ),
-                  trailing: allCompleted
-                      ? const Icon(Icons.check_circle, color: Colors.green)
-                      : Icon(Icons.expand_more, color: schemaColor),
-                  backgroundColor: allCompleted
-                      ? Colors.green.withOpacity(0.08)
-                      : schemaBg,
-                  collapsedBackgroundColor: schemaBg,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  collapsedShape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  children: schemas[schema]!.map((action) {
-                    bool isCompleted = completedActions.any(
-                        (e) => e.schema == schema && e.action == action);
-
-                    // Get requirement info
-                    final requirement =
-                        MeasureRequirements.getRequirement(schema, action);
-                    final isOptional =
-                        requirement?.isOptionalFor(widget.userQualification) ??
-                            false;
-                    final canPerform = requirement
-                            ?.canPerformWithQualification(
-                                widget.userQualification) ??
-                        true;
-                    final requirementLevel =
-                        requirement?.getRequirementLevel(widget.userQualification);
-
-                    return Container(
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        color: isCompleted
-                            ? Colors.green.withOpacity(0.12)
-                            : (isOptional
-                                ? Colors.blue.withOpacity(0.06)
-                                : null),
-                        border: isCompleted
-                            ? Border.all(
-                                color: Colors.green.withOpacity(0.4), width: 1)
-                            : (isOptional && !isCompleted
-                                ? Border.all(
-                                    color: Colors.blue.shade300, width: 1.5)
-                                : null),
+      body: sidePanel
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: ListView(
+                    children: [
+                      ..._buildStatusSection(),
+                      ColumnFlow(
+                        // Rechts sitzt das CPR-Bedienfeld, daher eine Spalte
+                        // weniger als im Normalmodus.
+                        columns: math.max(
+                            1,
+                            schemaColumnCount(
+                                    MediaQuery.sizeOf(context).width) -
+                                1),
+                        children: _buildSchemaCards(),
                       ),
-                      child: ListTile(
-                        dense: true,
-                        leading: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              isCompleted
-                                  ? Icons.check_circle
-                                  : Icons.radio_button_unchecked,
-                              color: isCompleted
-                                  ? Colors.green
-                                  : (isOptional ? Colors.blue : Colors.grey),
-                            ),
-                            if (isOptional && !isCompleted) ...[
-                              const SizedBox(width: 4),
-                              Icon(Icons.help_outline,
-                                  color: Colors.blue.shade600, size: 14),
-                            ],
-                            if (!canPerform) ...[
-                              const SizedBox(width: 4),
-                              Icon(Icons.lock,
-                                  color: Colors.orange.shade700, size: 14),
-                            ],
-                            if (isCompleted) ...[
-                              const SizedBox(width: 4),
-                              Icon(Icons.undo,
-                                  color: Colors.green.withOpacity(0.5),
-                                  size: 12),
-                            ],
-                          ],
-                        ),
-                        title: Text(
-                          action,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isCompleted
-                                ? Colors.green.shade800
-                                : (!canPerform ? Colors.grey.shade500 : null),
-                            fontWeight: isCompleted
-                                ? FontWeight.w500
-                                : FontWeight.normal,
-                            decoration: !canPerform
-                                ? TextDecoration.lineThrough
-                                : null,
-                          ),
-                        ),
-                        subtitle: !canPerform
-                            ? Text(
-                                'Nicht verfügbar für ${widget.userQualification.name}',
-                                style: TextStyle(
-                                    color: Colors.orange.shade700,
-                                    fontSize: 11),
-                              )
-                            : (isOptional
-                                ? Text(
-                                    requirementLevel ==
-                                            RequirementLevel.expected
-                                        ? 'Erwartet'
-                                        : 'Optional',
-                                    style: TextStyle(
-                                      color: requirementLevel ==
-                                              RequirementLevel.expected
-                                          ? Colors.amber.shade700
-                                          : Colors.blue.shade700,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  )
-                                : null),
-                        onTap: canPerform && !isCompleted
-                            ? () {
-                                setState(() {
-                                  completedActions.add(CompletedAction(
-                                    schema: schema,
-                                    action: action,
-                                    timestamp: DateTime.now(),
-                                  ));
-                                });
-                              }
-                            : null,
-                        onLongPress: isCompleted
-                            ? () {
-                                setState(() {
-                                  completedActions.removeWhere((e) =>
-                                      e.schema == schema &&
-                                      e.action == action);
-                                });
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                        '"$action" rückgängig gemacht'),
-                                    duration: const Duration(seconds: 2),
-                                    backgroundColor: Colors.orange,
-                                  ),
-                                );
-                              }
-                            : null,
-                      ),
-                    );
-                  }).toList(),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
                 ),
-              ),
-            );
-          }),
-          const SizedBox(height: 100), // Space for FABs
-        ],
-      ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          // Ventilation Button
-          ScaleTransition(
-            scale: _ventilationAnimation,
-            child: FloatingActionButton.extended(
-              heroTag: 'ventilation',
-              onPressed: _registerVentilation,
-              icon: const Icon(Icons.air, size: 32),
-              label: Text(
-                widget.isChildResuscitation && !_initialVentilationsComplete
-                    ? 'Initial ${_initialVentilationCount}/$_requiredInitialVentilations'
-                    : (_cycleCompressions >= _targetCompressionRatio ? 'Beatmung!' : 'Beatmung'),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              backgroundColor: widget.isChildResuscitation && !_initialVentilationsComplete
-                  ? Colors.orange
-                  : (_cycleCompressions >= _targetCompressionRatio ? Colors.orange : Colors.blue),
+                const VerticalDivider(width: 1),
+                SizedBox(
+                  width: compact ? _compactCprPanelWidth : _cprPanelWidth,
+                  // Im Querformat kann die Kamera-Aussparung rechts liegen.
+                  child: SafeArea(
+                    left: false,
+                    child: _buildCprPanel(compact: compact),
+                  ),
+                ),
+              ],
+            )
+          : ListView(
+              children: [
+                if (resuscitationStart != null) _buildReanimationDashboard(),
+                ..._buildStatusSection(),
+                ..._buildSchemaCards(),
+                const SizedBox(height: 100), // Space for FABs
+              ],
             ),
-          ),
-          const SizedBox(height: 16),
-
-          // Compression Button
-          ScaleTransition(
-            scale: _pulseAnimation,
-            child: FloatingActionButton.large(
-              heroTag: 'compression',
-              onPressed: _registerTap,
-              backgroundColor: Colors.red,
-              child: const Icon(Icons.favorite, size: 48),
+      floatingActionButton: sidePanel
+          ? null
+          : Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                _buildVentilationButton(),
+                const SizedBox(height: 16),
+                _buildCompressionButton(),
+              ],
             ),
-          ),
-        ],
-      ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    ),
     );
   }
 }

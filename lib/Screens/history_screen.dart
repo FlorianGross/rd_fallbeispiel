@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../measure_requirements.dart';
 import '../models/session_record.dart';
 import '../services/history_service.dart';
+import '../utils/adaptive_colors.dart';
+import '../widgets/responsive.dart';
+import 'result_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -29,6 +33,30 @@ class _HistoryScreenState extends State<HistoryScreen> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _openDetails(SessionRecord s) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MeasuresOverviewScreen(
+          completedActions: s.completedActions!,
+          missingActions: s.missingActions!,
+          userQualification: Qualification.values
+              .where((q) => q.name == s.qualification)
+              .firstOrNull,
+          sessionId: s.id,
+          scenarioName: s.scenarioName,
+          scoredSchemas: s.scoredSchemas?.toSet(),
+          initialNotes: s.notes,
+          durationSeconds: s.durationSeconds,
+          cprSummary: s.cpr,
+          fromHistory: true,
+        ),
+      ),
+    );
+    // Notizen können in der Detailansicht geändert worden sein
+    await _load();
   }
 
   Future<void> _deleteSession(String id) async {
@@ -96,7 +124,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ? const Center(child: CircularProgressIndicator())
           : _sessions.isEmpty
               ? _buildEmptyState()
-              : _buildContent(),
+              : ResponsiveCenter(child: _buildContent()),
     );
   }
 
@@ -109,7 +137,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           const SizedBox(height: 16),
           Text(
             'Noch keine Trainings gespeichert',
-            style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 18, color: context.mutedText),
           ),
           const SizedBox(height: 8),
           Text(
@@ -143,7 +171,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
               gradient: LinearGradient(
-                colors: [Colors.indigo.shade50, Colors.blue.shade50],
+                colors: [context.softBg(Colors.indigo), context.softBg(Colors.blue)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -169,12 +197,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
         ),
         const SizedBox(height: 12),
+        if (_buildForgottenCard() case final card?) ...[
+          card,
+          const SizedBox(height: 12),
+        ],
         // Session list
         ...List.generate(_sessions.length, (i) {
           final s = _sessions[i];
           return _SessionCard(
+            // Key nötig, damit State (Notizfeld) nach Löschen beim richtigen
+            // Eintrag bleibt und Notizen nicht der falschen Sitzung zugeordnet werden.
+            key: ValueKey(s.id),
             session: s,
             onDelete: () => _deleteSession(s.id),
+            onOpenDetails: s.hasDetails ? () => _openDetails(s) : null,
             onNotesChanged: (notes) async {
               await HistoryService.updateSessionNotes(s.id, notes);
               await _load();
@@ -182,6 +218,77 @@ class _HistoryScreenState extends State<HistoryScreen> {
           );
         }),
       ],
+    );
+  }
+
+  /// Pflichtmaßnahmen, die über mehrere Sitzungen am häufigsten gefehlt haben.
+  /// Nur Sitzungen mit gespeicherten Details fließen ein.
+  Widget? _buildForgottenCard() {
+    final detailed = _sessions.where((s) => s.hasDetails).toList();
+    if (detailed.length < 2) return null;
+
+    final counts = <String, int>{};
+    for (final s in detailed) {
+      for (final m in s.missingActions!) {
+        final key = '${m.schema} – ${m.action}';
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
+    }
+    if (counts.isEmpty) return null;
+    final top = counts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.psychology_alt, color: context.strongFg(Colors.orange)),
+                const SizedBox(width: 8),
+                const Text('Häufig vergessen',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Pflichtmaßnahmen, die in den letzten ${detailed.length} '
+              'Sitzungen am häufigsten gefehlt haben',
+              style: TextStyle(fontSize: 12, color: context.mutedText),
+            ),
+            const SizedBox(height: 8),
+            ...top.take(5).map((e) {
+              final share = e.value / detailed.length;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(e.key, style: const TextStyle(fontSize: 13)),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${e.value}× von ${detailed.length}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: share >= 0.5
+                            ? Colors.red
+                            : context.strongFg(Colors.orange),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
     );
   }
 
@@ -194,7 +301,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             style: TextStyle(
                 fontSize: 20, fontWeight: FontWeight.bold, color: color)),
         Text(label,
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+            style: TextStyle(fontSize: 11, color: context.mutedText)),
       ],
     );
   }
@@ -203,11 +310,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
 class _SessionCard extends StatefulWidget {
   final SessionRecord session;
   final VoidCallback onDelete;
+
+  /// Öffnet die Auswertung; null bei älteren Einträgen ohne Details
+  final VoidCallback? onOpenDetails;
   final Future<void> Function(String notes) onNotesChanged;
 
   const _SessionCard({
+    super.key,
     required this.session,
     required this.onDelete,
+    this.onOpenDetails,
     required this.onNotesChanged,
   });
 
@@ -265,8 +377,8 @@ class _SessionCardState extends State<_SessionCard> {
                     height: 48,
                     decoration: BoxDecoration(
                       color: s.isResuscitation
-                          ? Colors.red.shade50
-                          : Colors.blue.shade50,
+                          ? context.softBg(Colors.red)
+                          : context.softBg(Colors.blue),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
@@ -297,7 +409,7 @@ class _SessionCardState extends State<_SessionCard> {
                         Text(
                           '$dateStr  •  ${s.qualification}  •  ${s.formattedDuration}',
                           style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade600),
+                              fontSize: 12, color: context.mutedText),
                         ),
                         if (s.notes != null && s.notes!.isNotEmpty) ...[
                           const SizedBox(height: 4),
@@ -305,7 +417,7 @@ class _SessionCardState extends State<_SessionCard> {
                             s.notes!,
                             style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey.shade700,
+                                color: context.mutedText,
                                 fontStyle: FontStyle.italic),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -350,7 +462,7 @@ class _SessionCardState extends State<_SessionCard> {
       decoration: BoxDecoration(
         borderRadius:
             const BorderRadius.vertical(bottom: Radius.circular(14)),
-        color: Colors.grey.shade50,
+        color: context.softBg(Colors.grey),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -388,12 +500,18 @@ class _SessionCardState extends State<_SessionCard> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              TextButton.icon(
-                icon: const Icon(Icons.delete, color: Colors.red, size: 18),
-                label: const Text('Löschen',
-                    style: TextStyle(color: Colors.red, fontSize: 13)),
+              IconButton(
+                icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                tooltip: 'Sitzung löschen',
                 onPressed: widget.onDelete,
               ),
+              const Spacer(),
+              if (widget.onOpenDetails != null)
+                TextButton.icon(
+                  icon: const Icon(Icons.list_alt, size: 18),
+                  label: const Text('Details', style: TextStyle(fontSize: 13)),
+                  onPressed: widget.onOpenDetails,
+                ),
               ElevatedButton.icon(
                 icon: _savingNotes
                     ? const SizedBox(
@@ -407,8 +525,13 @@ class _SessionCardState extends State<_SessionCard> {
                     ? null
                     : () async {
                         setState(() => _savingNotes = true);
-                        await widget.onNotesChanged(_notesCtrl.text);
-                        if (mounted) setState(() => _savingNotes = false);
+                        try {
+                          await widget.onNotesChanged(_notesCtrl.text);
+                        } catch (e) {
+                          debugPrint('Notiz speichern fehlgeschlagen: $e');
+                        } finally {
+                          if (mounted) setState(() => _savingNotes = false);
+                        }
                       },
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(
@@ -435,7 +558,7 @@ class _SessionCardState extends State<_SessionCard> {
                 color: color)),
         Text(label,
             style:
-                TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                TextStyle(fontSize: 11, color: context.mutedText)),
       ],
     );
   }
