@@ -14,6 +14,15 @@ const double kMaxContentWidth = 760;
 bool isWideLayout(BuildContext context) =>
     MediaQuery.sizeOf(context).width >= kWideLayoutBreakpoint;
 
+/// Smartphone im Querformat: breit genug für ein seitliches Bedienfeld, aber
+/// zu niedrig für dessen volle Ausführung.
+bool isCompactLandscape(BuildContext context) {
+  final size = MediaQuery.sizeOf(context);
+  return size.width < kWideLayoutBreakpoint &&
+      size.width >= 600 &&
+      size.width > size.height;
+}
+
 /// Anzahl der Spalten für Schema-Karten bei der gegebenen Breite.
 int schemaColumnCount(double width) {
   if (width >= kThreeColumnBreakpoint) return 3;

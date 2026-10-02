@@ -94,4 +94,24 @@ void main() {
     expect(find.text('Kompression'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('Reanimation: Smartphone quer hat kompaktes CPR-Panel',
+      (tester) async {
+    _setSize(tester, const Size(844, 390));
+    await tester.pumpWidget(const MaterialApp(
+      home: ResuscitationScreen(
+        vehicleStatus: {},
+        vehicleArrivalMinutes: {},
+        isChildResuscitation: false,
+        userQualification: Qualification.RS,
+      ),
+    ));
+    await tester.pump();
+    expect(find.byType(FloatingActionButton), findsNothing);
+    await tester.tap(find.text('Kompression'));
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('Kompr.'), findsOneWidget);
+    expect(find.text('Bis zur Beatmung: 29'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

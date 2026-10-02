@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -753,6 +754,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   }
 
   static const double _cprPanelWidth = 380;
+  static const double _compactCprPanelWidth = 280;
 
   /// Pause-Banner und ankommende Rettungsmittel über der Schema-Liste.
   List<Widget> _buildStatusSection() {
@@ -816,7 +818,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
   /// Beatmungs-Taste. Im CPR-Bedienfeld ([inPanel]) als breite Taste über
   /// die volle Panelbreite, sonst als schwebender Button.
-  Widget _buildVentilationButton({bool inPanel = false}) {
+  Widget _buildVentilationButton({bool inPanel = false, bool compact = false}) {
     final label = widget.isChildResuscitation && !_initialVentilationsComplete
         ? 'Initial $_initialVentilationCount/$_requiredInitialVentilations'
         : (_cycleCompressions >= _targetCompressionRatio
@@ -831,7 +833,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     // Panelrand hinauswachsen.
     if (inPanel) {
       return SizedBox(
-        height: 72,
+        height: compact ? 52 : 72,
         child: FilledButton.icon(
           onPressed: _registerVentilation,
           style: FilledButton.styleFrom(
@@ -862,10 +864,10 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
 
   /// Kompressions-Taste (Frequenzmessung per Antippen). Im CPR-Bedienfeld
   /// ([inPanel]) als große Fläche, damit sie im Takt sicher getroffen wird.
-  Widget _buildCompressionButton({bool inPanel = false}) {
+  Widget _buildCompressionButton({bool inPanel = false, bool compact = false}) {
     if (inPanel) {
       return SizedBox(
-        height: 160,
+        height: compact ? 96 : 160,
         child: FilledButton(
           onPressed: _registerTap,
           style: FilledButton.styleFrom(
@@ -874,12 +876,12 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           ),
-          child: const Column(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.favorite, size: 64),
-              SizedBox(height: 4),
-              Text('Kompression',
+              Icon(Icons.favorite, size: compact ? 40 : 64),
+              const SizedBox(height: 4),
+              const Text('Kompression',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ],
           ),
@@ -897,37 +899,45 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     );
   }
 
-  /// Festes CPR-Bedienfeld rechts im breiten Layout (Tablet quer): oben die
-  /// Kennzahlen, unten große Tasten für Kompression und Beatmung.
-  Widget _buildCprPanel() {
+  /// Festes CPR-Bedienfeld rechts im breiten Layout (Tablet): oben die
+  /// Kennzahlen, unten große Tasten für Kompression und Beatmung. Im
+  /// Querformat auf dem Smartphone ([compact]) mit verdichteten Kennzahlen
+  /// und kleineren Tasten.
+  Widget _buildCprPanel({bool compact = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
           child: ListView(
             children: [
-              if (resuscitationStart != null)
-                _buildReanimationDashboard()
-              else
+              if (resuscitationStart == null)
                 Padding(
-                  padding: const EdgeInsets.all(24),
+                  padding: EdgeInsets.all(compact ? 12 : 24),
                   child: Text(
-                    'Mit der ersten Kompression startet die Reanimation.',
+                    widget.isChildResuscitation
+                        ? 'Mit der ersten Initialbeatmung startet die Reanimation.'
+                        : 'Mit der ersten Kompression startet die Reanimation.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: context.mutedText),
                   ),
-                ),
+                )
+              else if (compact)
+                _buildCompactCprStats()
+              else
+                _buildReanimationDashboard(),
             ],
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          padding: compact
+              ? const EdgeInsets.fromLTRB(12, 4, 12, 12)
+              : const EdgeInsets.fromLTRB(16, 8, 16, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _buildVentilationButton(inPanel: true),
-              const SizedBox(height: 24),
-              _buildCompressionButton(inPanel: true),
+              _buildVentilationButton(inPanel: true, compact: compact),
+              SizedBox(height: compact ? 12 : 24),
+              _buildCompressionButton(inPanel: true, compact: compact),
             ],
           ),
         ),
@@ -935,9 +945,67 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
     );
   }
 
+  /// Verdichtete Kennzahlen für das kompakte CPR-Bedienfeld: Frequenz,
+  /// Zähler und Fortschritt bis zur nächsten Beatmung.
+  Widget _buildCompactCprStats() {
+    final initialPhase =
+        widget.isChildResuscitation && !_initialVentilationsComplete;
+    Widget tile(String value, String label, Color color) => Expanded(
+          child: Column(
+            children: [
+              Text(value,
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: color)),
+              Text(label,
+                  style: TextStyle(fontSize: 11, color: context.mutedText)),
+            ],
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              tile(_bpm.toStringAsFixed(0), 'BPM', _getBPMColor()),
+              tile('$_compressionCount', 'Kompr.', Colors.red),
+              tile('$_ventilationCount', 'Beatm.', Colors.blue),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            initialPhase
+                ? 'Initialbeatmungen: $_initialVentilationCount / $_requiredInitialVentilations'
+                : 'Bis zur Beatmung: ${_targetCompressionRatio - _cycleCompressions}',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 4),
+          LinearProgressIndicator(
+            value: initialPhase
+                ? _initialVentilationCount / _requiredInitialVentilations
+                : _cycleCompressions / _targetCompressionRatio,
+            backgroundColor: context.trackBg,
+            valueColor: AlwaysStoppedAnimation<Color>(
+              initialPhase || _cycleCompressions >= _targetCompressionRatio
+                  ? Colors.orange
+                  : Colors.green,
+            ),
+            minHeight: 6,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final wide = isWideLayout(context);
+    // Seitliches CPR-Bedienfeld auf Tablets und – kompakt – auf Smartphones
+    // im Querformat, wo die schwebenden Tasten fast die ganze Liste verdecken.
+    final compact = isCompactLandscape(context);
+    final sidePanel = isWideLayout(context) || compact;
     return PopScope(
       // Zurück-Taste/-Geste soll eine laufende Reanimation nicht
       // kommentarlos verwerfen.
@@ -1036,7 +1104,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           ),
         ],
       ),
-      body: wide
+      body: sidePanel
           ? Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1047,9 +1115,11 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                       ColumnFlow(
                         // Rechts sitzt das CPR-Bedienfeld, daher eine Spalte
                         // weniger als im Normalmodus.
-                        columns: schemaColumnCount(
-                                MediaQuery.sizeOf(context).width) -
+                        columns: math.max(
                             1,
+                            schemaColumnCount(
+                                    MediaQuery.sizeOf(context).width) -
+                                1),
                         children: _buildSchemaCards(),
                       ),
                       const SizedBox(height: 20),
@@ -1057,7 +1127,14 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                   ),
                 ),
                 const VerticalDivider(width: 1),
-                SizedBox(width: _cprPanelWidth, child: _buildCprPanel()),
+                SizedBox(
+                  width: compact ? _compactCprPanelWidth : _cprPanelWidth,
+                  // Im Querformat kann die Kamera-Aussparung rechts liegen.
+                  child: SafeArea(
+                    left: false,
+                    child: _buildCprPanel(compact: compact),
+                  ),
+                ),
               ],
             )
           : ListView(
@@ -1068,7 +1145,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                 const SizedBox(height: 100), // Space for FABs
               ],
             ),
-      floatingActionButton: wide
+      floatingActionButton: sidePanel
           ? null
           : Column(
               mainAxisAlignment: MainAxisAlignment.end,
