@@ -155,6 +155,49 @@ void main() {
     });
   });
 
+  group('WASB als Auswahl-Schema', () {
+    test('Reanimation: bewusstlos gewählt → WASB vollständig, nichts fehlt',
+        () {
+      final done = [_done('WASB', 'Bewusstlos')];
+      final missing = MeasureRequirements.calculateMissingRequiredActions(
+        done,
+        Qualification.RS,
+        onlySchemas: MeasureRequirements.resuscitationSchemas,
+      );
+      expect(missing.any((m) => m.schema == 'WASB'), isFalse);
+      expect(
+        MeasureRequirements.isSchemaComplete('WASB', done, Qualification.RS),
+        isTrue,
+      );
+      expect(
+        MeasureRequirements.countCompletedRequiredActions(
+            done, Qualification.RS),
+        1,
+      );
+    });
+
+    test('keine Stufe gewählt → genau eine fehlende Maßnahme', () {
+      final missing = MeasureRequirements.calculateMissingRequiredActions(
+          [], Qualification.SAN);
+      final wasb = missing.where((m) => m.schema == 'WASB').toList();
+      expect(wasb, hasLength(1));
+      expect(wasb.single.action,
+          MeasureRequirements.singleChoiceMissingLabel('WASB'));
+      expect(
+        MeasureRequirements.isSchemaComplete('WASB', [], Qualification.SAN),
+        isFalse,
+      );
+    });
+
+    test('mehrere Stufen angetippt zählen als eine Pflichtmaßnahme', () {
+      expect(
+        MeasureRequirements.countCompletedRequiredActions(
+            _allOf('WASB'), Qualification.NFS),
+        1,
+      );
+    });
+  });
+
   group('SessionRecord', () {
     SessionRecord record({int? requiredDone}) => SessionRecord(
           id: '1',

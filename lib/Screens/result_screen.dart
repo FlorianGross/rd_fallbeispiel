@@ -224,7 +224,6 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
             ? requirement?.getRequirementLevel(widget.userQualification!)
             : RequirementLevel.required;
 
-        final isOptional = requirementLevel == RequirementLevel.optional;
         final isExpected = requirementLevel == RequirementLevel.expected;
         final isRequired = requirementLevel == RequirementLevel.required;
 

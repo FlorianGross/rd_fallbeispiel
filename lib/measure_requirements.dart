@@ -815,6 +815,17 @@ class MeasureRequirements {
     'Nachforderung',
   };
 
+  /// Schemata, deren Maßnahmen sich gegenseitig ausschließen: Es wird genau
+  /// eine Stufe dokumentiert (z. B. WASB – ein Patient ist entweder wach oder
+  /// bewusstlos). Das Schema gilt als erledigt, sobald eine Stufe gewählt ist;
+  /// fehlt sie, zählt das als eine fehlende Pflichtmaßnahme.
+  static const Set<String> singleChoiceSchemas = {'WASB'};
+
+  /// Bezeichnung der fehlenden Maßnahme, wenn in einem Auswahl-Schema
+  /// ([singleChoiceSchemas]) keine Stufe gewählt wurde.
+  static String singleChoiceMissingLabel(String schema) =>
+      '$schema – keine Stufe erhoben';
+
   /// Hat das Schema für diese Qualifikation verpflichtende oder erwartete
   /// Maßnahmen? Rein optionale Schemata zählen nicht zum Fortschritt.
   static bool hasCountedMeasures(
@@ -834,7 +845,7 @@ class MeasureRequirements {
     final measures = requirements[schema] ?? const <MeasureRequirement>[];
     final counted =
         measures.where((m) => m.countsForSchemaCompletion(userQualification));
-    if (counted.isEmpty) {
+    if (counted.isEmpty || singleChoiceSchemas.contains(schema)) {
       return completedActions.any((e) => e.schema == schema);
     }
     return counted.every((m) => completedActions
@@ -848,12 +859,21 @@ class MeasureRequirements {
     Qualification userQualification, {
     Set<String>? onlySchemas,
   }) {
+    final countedSingleChoice = <String>{};
     return completedActions.where((a) {
       if (onlySchemas != null && !onlySchemas.contains(a.schema)) return false;
       final measures = requirements[a.schema];
       if (measures == null) return false;
       final req = measures.where((m) => m.action == a.action);
-      return req.isNotEmpty && req.first.shouldCountAsMissing(userQualification);
+      if (req.isEmpty || !req.first.shouldCountAsMissing(userQualification)) {
+        return false;
+      }
+      // Auswahl-Schema zählt als eine Pflichtmaßnahme, egal wie viele Stufen
+      // angetippt wurden.
+      if (singleChoiceSchemas.contains(a.schema)) {
+        return countedSingleChoice.add(a.schema);
+      }
+      return true;
     }).length;
   }
 
@@ -868,6 +888,20 @@ class MeasureRequirements {
 
     requirements.forEach((schema, measures) {
       if (onlySchemas != null && !onlySchemas.contains(schema)) return;
+      if (singleChoiceSchemas.contains(schema)) {
+        final isRequired =
+            measures.any((m) => m.shouldCountAsMissing(userQualification));
+        final anyChosen = completedActions.any((a) => a.schema == schema);
+        if (isRequired && !anyChosen) {
+          missingRequired.add(MissingAction(
+            schema: schema,
+            action: singleChoiceMissingLabel(schema),
+            requirementLevel: RequirementLevel.required,
+            note: 'Eine Stufe auswählen',
+          ));
+        }
+        return;
+      }
       for (var measure in measures) {
         // Prüfe ob die Maßnahme durchgeführt wurde
         bool isCompleted = completedActions.any(
