@@ -8,11 +8,14 @@ import 'package:rd_fallbeispiel/Screens/result_screen.dart';
 import '../main.dart';
 import '../measure_requirements.dart';
 import '../models/cpr_summary.dart';
+import '../models/medication.dart';
+import '../models/resuscitation_notes.dart';
 import '../models/scenario.dart';
 import '../models/session_record.dart';
 import '../services/history_service.dart';
 import '../services/pdf_service.dart';
 import '../utils/adaptive_colors.dart';
+import '../widgets/medication_widgets.dart';
 import '../widgets/responsive.dart';
 import '../widgets/scenario_common.dart';
 import 'scenario_session.dart';
@@ -209,6 +212,9 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
   bool _allExpanded = false;
   DateTime? resuscitationStart;
 
+  /// Zeitpunkte der abgegebenen Schocks (Szenario-Uhr)
+  final List<DateTime> _shockTimes = [];
+
   // AED / Rhythmuskontrolle
   /// Stand der Szenario-Uhr beim Reanimationsbeginn
   Duration? _reaniStartOffset;
@@ -316,6 +322,14 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
       ventilationHistory: _ventilationHistory,
       vehicleStatus: widget.vehicleStatus,
       scenarioName: widget.scenario?.name,
+      medications: medications,
+      medicationNotes: resuscitationMedicationNotes(
+        medications: medications,
+        shockTimes: _shockTimes,
+        resuscitationStart: resuscitationStart,
+        medicationsAllowed:
+            canDocumentMedication(widget.userQualification),
+      ),
     );
   }
 
@@ -498,7 +512,10 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         compressions: _compressionCount,
         ventilations: _ventilationCount,
         bpmHistory: _bpmHistory,
+        shockTimes: List.of(_shockTimes),
+        startedAt: resuscitationStart,
       ),
+      medications: List.of(medications),
     );
     await HistoryService.saveSession(record);
 
@@ -518,9 +535,140 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           scenarioName: widget.scenario?.name,
           scoredSchemas: MeasureRequirements.resuscitationSchemas,
           durationSeconds: elapsedSeconds,
+          medications: List.of(medications),
+          shockTimes: List.of(_shockTimes),
         ),
       ),
     );
+  }
+
+  /// Schock dokumentieren; der erste Schock hakt „Defibrillation“ ab.
+  void _registerShock() {
+    HapticFeedback.heavyImpact();
+    setState(() {
+      final now = scenarioNow;
+      _shockTimes.add(now);
+      if (!completedActions
+          .any((e) => e.schema == 'Maßnahmen' && e.action == 'Defibrillation')) {
+        completedActions.add(CompletedAction(
+          schema: 'Maßnahmen',
+          action: 'Defibrillation',
+          timestamp: now,
+        ));
+      }
+    });
+  }
+
+  /// Zeit seit der letzten Adrenalin-Gabe (Szenario-Uhr), null = noch keine
+  Duration? get _sinceLastAdrenalin {
+    final times = medications
+        .where((m) => m.medication.wirkstoff == 'Adrenalin')
+        .map((m) => m.timestamp);
+    if (times.isEmpty) return null;
+    final last = times.reduce((a, b) => a.isAfter(b) ? a : b);
+    return scenarioNow.difference(last);
+  }
+
+  /// Schock-Taste, Schnellzugriff auf Adrenalin/Amiodaron und die Zeit seit
+  /// dem letzten Adrenalin. Bewusst nur eine Anzeige (grün < 3 min,
+  /// orange 3–5 min, rot > 5 min) und kein weiterer Dialog.
+  Widget _buildCprActionRow({bool compact = false}) {
+    final canMeds = canDocumentMedication(widget.userQualification);
+    final since = _sinceLastAdrenalin;
+    final sinceColor = since == null
+        ? context.mutedText
+        : since < const Duration(minutes: 3)
+            ? Colors.green
+            : since <= const Duration(minutes: 5)
+                ? Colors.orange
+                : Colors.red;
+    final shocks = _shockTimes.length;
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 4 : 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Im kompakten Panel kurze Beschriftungen ohne Symbol, damit alle
+          // drei Tasten in eine Zeile passen.
+          Wrap(
+            spacing: compact ? 4 : 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              _cprActionButton(
+                label: shocks == 0 ? 'Schock' : 'Schock ($shocks)',
+                icon: Icons.bolt,
+                compact: compact,
+                color: context.strongFg(Colors.amber),
+                onPressed: _registerShock,
+              ),
+              if (canMeds) ...[
+                _cprActionButton(
+                  label: compact ? 'Adren.' : 'Adrenalin',
+                  icon: Icons.vaccines,
+                  compact: compact,
+                  onPressed: () => addMedication(
+                    completedActions,
+                    preset: MedicationCatalog.adrenalin,
+                    presetRoute: 'i.v.',
+                  ),
+                ),
+                _cprActionButton(
+                  label: compact ? 'Amio' : 'Amiodaron',
+                  icon: Icons.vaccines,
+                  compact: compact,
+                  onPressed: () => addMedication(
+                    completedActions,
+                    preset: MedicationCatalog.amiodaron,
+                    presetRoute: 'i.v.',
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (canMeds && since != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.timer_outlined, size: 18, color: sinceColor),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      'Letztes Adrenalin vor ${formatOffset(since)} min',
+                      style: TextStyle(
+                          color: sinceColor, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cprActionButton({
+    required String label,
+    required IconData icon,
+    required bool compact,
+    required VoidCallback onPressed,
+    Color? color,
+  }) {
+    final style = OutlinedButton.styleFrom(
+      foregroundColor: color,
+      visualDensity: compact ? VisualDensity.compact : null,
+      padding: compact ? const EdgeInsets.symmetric(horizontal: 10) : null,
+    );
+    return compact
+        ? OutlinedButton(onPressed: onPressed, style: style, child: Text(label))
+        : OutlinedButton.icon(
+            onPressed: onPressed,
+            style: style,
+            icon: Icon(icon),
+            label: Text(label),
+          );
   }
 
   Widget _buildReanimationDashboard() {
@@ -781,6 +929,13 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
         arrivedVehicles: arrivedVehicles,
         now: scenarioNow,
       ),
+      if (canDocumentMedication(widget.userQualification))
+        MedicationCard(
+          administrations: medications,
+          formatTimestamp: relativeTime,
+          onAdd: () => addMedication(completedActions),
+          onRemove: removeMedication,
+        ),
     ];
   }
 
@@ -925,6 +1080,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                 _buildCompactCprStats()
               else
                 _buildReanimationDashboard(),
+              _buildCprActionRow(compact: compact),
             ],
           ),
         ),
@@ -1075,6 +1231,8 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
                     ventilationCount: _ventilationCount,
                     resuscitationStart: resuscitationStart,
                     scoredSchemas: MeasureRequirements.resuscitationSchemas,
+                    medications: List.of(medications),
+                    shockTimes: List.of(_shockTimes),
                   );
                 }),
               );
@@ -1140,6 +1298,7 @@ class _ResuscitationScreenState extends State<ResuscitationScreen>
           : ListView(
               children: [
                 if (resuscitationStart != null) _buildReanimationDashboard(),
+                _buildCprActionRow(),
                 ..._buildStatusSection(),
                 ..._buildSchemaCards(),
                 const SizedBox(height: 100), // Space for FABs

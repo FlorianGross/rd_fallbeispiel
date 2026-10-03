@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../measure_requirements.dart';
 import '../models/cpr_summary.dart';
+import '../models/medication.dart';
+import '../models/resuscitation_notes.dart';
 import '../services/history_service.dart';
 import '../services/pdf_service.dart';
 import '../utils/schema_icons.dart';
@@ -36,6 +38,13 @@ class MeasuresOverviewScreen extends StatefulWidget {
   /// der Frequenzverlauf selbst nicht mehr vorliegt)
   final CprSummary? cprSummary;
 
+  /// Dokumentierte Medikamentengaben
+  final List<MedicationAdministration> medications;
+
+  /// Zeitpunkte der Schocks (live aus dem Reanimations-Screen; aus dem
+  /// Verlauf stehen sie in [cprSummary])
+  final List<DateTime>? shockTimes;
+
   const MeasuresOverviewScreen({
     super.key,
     required this.completedActions,
@@ -53,6 +62,8 @@ class MeasuresOverviewScreen extends StatefulWidget {
     this.fromHistory = false,
     this.durationSeconds,
     this.cprSummary,
+    this.medications = const [],
+    this.shockTimes,
   });
 
   @override
@@ -84,6 +95,8 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
         elapsedSeconds: widget.durationSeconds ?? 0,
         scenarioName: widget.scenarioName,
         notes: _notesCtrl.text,
+        medications: widget.medications,
+        medicationNotes: _medicationNotes,
       );
     } catch (e) {
       debugPrint('PDF-Export fehlgeschlagen: $e');
@@ -598,6 +611,8 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
 
         if (_cprSummary case final cpr?) _buildCprCard(cpr),
 
+        if (_showMedicationCard) _buildMedicationCard(),
+
         // Qualification Info Card
         if (widget.userQualification != null)
           Card(
@@ -1010,7 +1025,111 @@ class _MeasuresOverviewScreenState extends State<MeasuresOverviewScreen> {
               compressions: widget.compressionCount!,
               ventilations: widget.ventilationCount ?? 0,
               bpmHistory: widget.bpmHistory ?? const [],
+              shockTimes: widget.shockTimes,
+              startedAt: widget.resuscitationStart,
             ));
+
+  /// Beschreibende Hinweise zu Adrenalin, Amiodaron und Schocks (nur bei
+  /// Reanimationen)
+  List<String> get _medicationNotes {
+    final cpr = _cprSummary;
+    if (cpr == null) return const [];
+    return resuscitationMedicationNotes(
+      medications: widget.medications,
+      shockTimes: cpr.shockTimes ?? const [],
+      resuscitationStart: cpr.startedAt ?? widget.resuscitationStart,
+      medicationsAllowed: _medicationsAllowed,
+    );
+  }
+
+  bool get _medicationsAllowed =>
+      widget.userQualification == null ||
+      MeasureRequirements.canDocumentMedication(widget.userQualification!);
+
+  /// Medikamenten-Karte nur, wenn es etwas zu zeigen gibt – nicht bei
+  /// älteren Verlaufseinträgen aus der Zeit vor dem Medikamenten-Protokoll.
+  bool get _showMedicationCard =>
+      widget.medications.isNotEmpty || _medicationNotes.isNotEmpty;
+
+  /// Gegebene Medikamente (Zeit relativ zur ersten Maßnahme) und bei der
+  /// Reanimation die Hinweise zu Adrenalin/Amiodaron/Schocks
+  Widget _buildMedicationCard() {
+    final meds = List<MedicationAdministration>.of(widget.medications)
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    final starts = [
+      ...widget.completedActions.map((a) => a.timestamp),
+      ...meds.map((m) => m.timestamp),
+    ];
+    final t0 = starts.isEmpty
+        ? DateTime.now()
+        : starts.reduce((a, b) => a.isBefore(b) ? a : b);
+    final notes = _medicationNotes;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.vaccines, color: context.strongFg(Colors.indigo)),
+                const SizedBox(width: 8),
+                const Text('Medikamente',
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (meds.isEmpty && _medicationsAllowed)
+              Text('Keine Medikamente dokumentiert',
+                  style: TextStyle(color: context.mutedText)),
+            for (final m in meds)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 56,
+                      child: Text(
+                        '+${formatOffset(m.timestamp.difference(t0))}',
+                        style: TextStyle(color: context.mutedText),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                          '${m.medication.wirkstoff} ${m.dose} ${m.route}'),
+                    ),
+                  ],
+                ),
+              ),
+            if (notes.isNotEmpty) ...[
+              const Divider(height: 24),
+              Text('Hinweise zur Nachbesprechung',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, color: context.mutedText)),
+              const SizedBox(height: 4),
+              for (final n in notes)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline,
+                          size: 16, color: context.mutedText),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(n)),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
   /// Kennzahlen + Frequenzverlauf der Reanimation
   Widget _buildCprCard(CprSummary cpr) {

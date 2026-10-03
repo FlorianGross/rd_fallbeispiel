@@ -815,6 +815,14 @@ class MeasureRequirements {
     'Nachforderung',
   };
 
+  /// Medikamente dokumentieren darf, wer „Medikamentengabe“ durchführen kann
+  /// (RS, NFS). Für SAN/RH wäre die automatisch abgehakte Maßnahme sonst als
+  /// „nicht zulässig“ in der Auswertung.
+  static bool canDocumentMedication(Qualification qualification) =>
+      getRequirement('Maßnahmen (erweitert)', 'Medikamentengabe')
+          ?.canPerformWithQualification(qualification) ??
+      false;
+
   /// Schemata, deren Maßnahmen sich gegenseitig ausschließen: Es wird genau
   /// eine Stufe dokumentiert (z. B. WASB – ein Patient ist entweder wach oder
   /// bewusstlos). Das Schema gilt als erledigt, sobald eine Stufe gewählt ist;

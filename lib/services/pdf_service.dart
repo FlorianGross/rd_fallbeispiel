@@ -4,6 +4,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../measure_requirements.dart';
+import '../models/medication.dart';
+import '../models/resuscitation_notes.dart';
 
 class PdfService {
   /// Erzeugt und öffnet den Trainingsbericht für den normalen Einsatzmodus
@@ -14,6 +16,8 @@ class PdfService {
     required int elapsedSeconds,
     String? scenarioName,
     String? notes,
+    List<MedicationAdministration> medications = const [],
+    List<String> medicationNotes = const [],
   }) async {
     final pdf = await buildNormalPdf(
       completedActions: completedActions,
@@ -22,6 +26,8 @@ class PdfService {
       elapsedSeconds: elapsedSeconds,
       scenarioName: scenarioName,
       notes: notes,
+      medications: medications,
+      medicationNotes: medicationNotes,
     );
     await _output(pdf, 'Trainingsbericht', scenarioName);
   }
@@ -34,6 +40,8 @@ class PdfService {
     required int elapsedSeconds,
     String? scenarioName,
     String? notes,
+    List<MedicationAdministration> medications = const [],
+    List<String> medicationNotes = const [],
   }) async {
     final pdf = pw.Document(theme: await _pdfTheme());
 
@@ -276,6 +284,7 @@ class PdfService {
               ),
             ],
 
+            ..._buildMedicationSection(medications, medicationNotes, firstTimeStamp),
             ..._buildNotesSection(notes),
 
             // Footer
@@ -316,6 +325,8 @@ class PdfService {
     required Map<String, VehicleStatus> vehicleStatus,
     String? scenarioName,
     String? notes,
+    List<MedicationAdministration> medications = const [],
+    List<String> medicationNotes = const [],
   }) async {
     final pdf = await buildResuscitationPdf(
       completedActions: completedActions,
@@ -333,6 +344,8 @@ class PdfService {
       vehicleStatus: vehicleStatus,
       scenarioName: scenarioName,
       notes: notes,
+      medications: medications,
+      medicationNotes: medicationNotes,
     );
     await _output(pdf, 'Reanimationsbericht', scenarioName);
   }
@@ -354,6 +367,8 @@ class PdfService {
     required Map<String, VehicleStatus> vehicleStatus,
     String? scenarioName,
     String? notes,
+    List<MedicationAdministration> medications = const [],
+    List<String> medicationNotes = const [],
   }) async {
     final pdf = pw.Document(theme: await _pdfTheme());
 
@@ -714,6 +729,8 @@ class PdfService {
               ),
             ],
 
+            ..._buildMedicationSection(
+                medications, medicationNotes, firstActionTime),
             ..._buildNotesSection(notes),
 
             // Footer
@@ -768,6 +785,69 @@ class PdfService {
       name: '$title${scenarioPart}_$date.pdf',
       onLayout: (PdfPageFormat format) async => pdf.save(),
     );
+  }
+
+  /// Medikamentengaben als Tabelle (Zeit relativ zu [t0] wie im übrigen
+  /// Protokoll, Wirkstoff, Dosis, Weg) und die Reanimations-Hinweise
+  static List<pw.Widget> _buildMedicationSection(
+    List<MedicationAdministration> medications,
+    List<String> medicationNotes,
+    DateTime t0,
+  ) {
+    if (medications.isEmpty && medicationNotes.isEmpty) return const [];
+    final meds = List<MedicationAdministration>.of(medications)
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return [
+      pw.SizedBox(height: 20),
+      pw.Container(
+        width: double.infinity,
+        padding: const pw.EdgeInsets.all(15),
+        decoration: pw.BoxDecoration(
+          color: PdfColors.indigo50,
+          border: pw.Border.all(color: PdfColors.indigo200),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              'MEDIKAMENTE (${meds.length})',
+              style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 8),
+            if (meds.isNotEmpty)
+              pw.TableHelper.fromTextArray(
+                headers: ['Zeit', 'Wirkstoff', 'Dosis', 'Weg'],
+                data: [
+                  for (final m in meds)
+                    [
+                      '+${formatOffset(m.timestamp.difference(t0))}',
+                      m.medication.label,
+                      m.dose,
+                      m.route,
+                    ],
+                ],
+                headerStyle:
+                    pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+                cellStyle: const pw.TextStyle(fontSize: 10),
+                headerDecoration:
+                    const pw.BoxDecoration(color: PdfColors.indigo100),
+                border: pw.TableBorder.all(color: PdfColors.indigo200, width: 0.5),
+              ),
+            if (medicationNotes.isNotEmpty) ...[
+              pw.SizedBox(height: 10),
+              pw.Text(
+                'Hinweise zur Nachbesprechung',
+                style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+              ),
+              pw.SizedBox(height: 4),
+              for (final n in medicationNotes)
+                pw.Bullet(text: n, style: const pw.TextStyle(fontSize: 10)),
+            ],
+          ],
+        ),
+      ),
+    ];
   }
 
   static List<pw.Widget> _buildNotesSection(String? notes) {

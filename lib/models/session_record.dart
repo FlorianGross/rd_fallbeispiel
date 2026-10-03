@@ -1,5 +1,6 @@
 import '../measure_requirements.dart';
 import 'cpr_summary.dart';
+import 'medication.dart';
 
 class SessionRecord {
   final String id;
@@ -28,6 +29,9 @@ class SessionRecord {
   /// Kennzahlen der Reanimation (nur bei Reanimations-Sitzungen)
   final CprSummary? cpr;
 
+  /// Dokumentierte Medikamentengaben. Bei älteren Einträgen null.
+  final List<MedicationAdministration>? medications;
+
   const SessionRecord({
     required this.id,
     required this.startTime,
@@ -44,6 +48,7 @@ class SessionRecord {
     this.missingActions,
     this.scoredSchemas,
     this.cpr,
+    this.medications,
   });
 
   /// Sind die Maßnahmenlisten gespeichert (Einträge ab dieser Version)?
@@ -78,6 +83,7 @@ class SessionRecord {
       missingActions: missingActions,
       scoredSchemas: scoredSchemas,
       cpr: cpr,
+      medications: medications,
     );
   }
 
@@ -112,6 +118,8 @@ class SessionRecord {
               .toList(),
         if (scoredSchemas != null) 'scoredSchemas': scoredSchemas,
         if (cpr != null) 'cpr': cpr!.toJson(),
+        if (medications != null)
+          'medications': medications!.map((m) => m.toJson()).toList(),
       };
 
   factory SessionRecord.fromJson(Map<String, dynamic> json) => SessionRecord(
@@ -152,5 +160,9 @@ class SessionRecord {
         cpr: json['cpr'] == null
             ? null
             : CprSummary.fromJson(json['cpr'] as Map<String, dynamic>),
+        medications: (json['medications'] as List<dynamic>?)
+            ?.map((e) =>
+                MedicationAdministration.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
 }

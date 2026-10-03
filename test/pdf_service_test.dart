@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rd_fallbeispiel/measure_requirements.dart';
+import 'package:rd_fallbeispiel/models/medication.dart';
 import 'package:rd_fallbeispiel/services/pdf_service.dart';
 
 const _outDir = String.fromEnvironment('PDF_OUT');
@@ -76,6 +77,18 @@ void main() {
       ],
       vehicleStatus: const {},
       scenarioName: 'Kreislaufstillstand (Reanimation)',
+      medications: [
+        MedicationAdministration(
+          medication: MedicationCatalog.adrenalin,
+          dose: '1 mg',
+          route: 'i.o.',
+          timestamp: start.add(const Duration(seconds: 70)),
+        ),
+      ],
+      medicationNotes: const [
+        'Schocks: 0',
+        'Adrenalin: 1× – erste Gabe 1:10 nach Reanimationsbeginn',
+      ],
     );
     final bytes = await pdf.save();
     expect(bytes.length, greaterThan(1000));

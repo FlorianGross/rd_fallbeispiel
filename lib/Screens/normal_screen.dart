@@ -9,6 +9,7 @@ import '../models/session_record.dart';
 import '../services/history_service.dart';
 import '../services/pdf_service.dart';
 import '../utils/adaptive_colors.dart';
+import '../widgets/medication_widgets.dart';
 import '../widgets/responsive.dart';
 import '../widgets/scenario_common.dart';
 import 'result_screen.dart';
@@ -121,6 +122,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen>
       userQualification: widget.userQualification,
       elapsedSeconds: elapsedSeconds,
       scenarioName: widget.scenario?.name,
+      medications: medications,
     );
   }
 
@@ -167,6 +169,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen>
       completedActions: List.of(completedActions),
       missingActions: missingActions,
       scoredSchemas: _scoredSchemas?.toList(),
+      medications: List.of(medications),
     );
     await HistoryService.saveSession(record);
 
@@ -181,6 +184,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen>
           scenarioName: widget.scenario?.name,
           scoredSchemas: _scoredSchemas,
           durationSeconds: elapsedSeconds,
+          medications: List.of(medications),
         ),
       ),
     );
@@ -252,6 +256,7 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen>
                     userQualification: widget.userQualification,
                     scenarioName: widget.scenario?.name,
                     scoredSchemas: _scoredSchemas,
+                    medications: List.of(medications),
                   );
                 }),
               );
@@ -342,6 +347,13 @@ class _SchemaSelectionScreenState extends State<SchemaSelectionScreen>
             arrivedVehicles: arrivedVehicles,
             now: scenarioNow,
           ),
+          if (canDocumentMedication(widget.userQualification))
+            MedicationCard(
+              administrations: medications,
+              formatTimestamp: relativeTime,
+              onAdd: () => addMedication(completedActions),
+              onRemove: removeMedication,
+            ),
 
           ColumnFlow(
             columns: schemaColumnCount(MediaQuery.sizeOf(context).width),
