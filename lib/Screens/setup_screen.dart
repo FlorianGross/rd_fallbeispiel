@@ -7,6 +7,7 @@ import '../models/scenario.dart';
 import '../utils/adaptive_colors.dart';
 import '../widgets/responsive.dart';
 import 'history_screen.dart';
+import 'medication_catalog_screen.dart';
 import 'normal_screen.dart';
 import 'scenario_library_screen.dart';
 
@@ -228,6 +229,15 @@ class _QualificationSelectionScreenState
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const HistoryScreen()),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.vaccines, color: Colors.white),
+            tooltip: 'Medikamentenkatalog',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const MedicationCatalogScreen()),
             ),
           ),
           ValueListenableBuilder<ThemeMode>(

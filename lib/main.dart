@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'Screens/setup_screen.dart';
+import 'services/medication_catalog_service.dart';
 
 /// Globaler ThemeMode-Notifier – kein Paket benötigt
 final ValueNotifier<ThemeMode> themeModeNotifier =
@@ -14,6 +15,7 @@ const String _themeModeKey = 'theme_mode';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _restoreThemeMode();
+  await MedicationCatalogService.load();
   _registerFontLicense();
   runApp(const PatientCareApp());
 }

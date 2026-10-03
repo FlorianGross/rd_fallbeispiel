@@ -20,8 +20,9 @@ Pflichtmaßnahmen für die gewählte Qualifikation gefehlt haben.
   Zeitpunkt. In der Reanimation zusätzlich Schock-Zähler, Schnellzugriff auf
   Adrenalin/Amiodaron, Zeit seit dem letzten Adrenalin und Hinweise für die
   Nachbesprechung. Trainingswerkzeug, keine Dosierhilfe: Dosen werden weder
-  vorgeschlagen noch berechnet, und der Katalog ist regional anzupassen
-  (`lib/models/medication.dart`).
+  vorgeschlagen noch berechnet. Der Katalog lässt sich in der App anpassen
+  (Spritzen-Symbol auf der Startseite) und jederzeit auf den Standard
+  zurücksetzen.
 - **Nachalarmierte Fahrzeuge** (KTW, RTW, NEF, RTH) mit Ankunftszeit.
 - **Auswertung, Verlauf und PDF-Bericht** inkl. „Häufig vergessen“ und Notizen.
 

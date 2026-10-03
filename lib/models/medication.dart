@@ -98,6 +98,11 @@ class MedicationCatalog {
       staerke: '150 mg / 3 ml',
       handelsname: 'Cordarex');
 
+  /// Aktuell verwendeter Katalog: Standard ([all]) oder die in der App
+  /// angepasste Liste (siehe `MedicationCatalogService`).
+  static List<Medication> current = all;
+
+  /// Standard-Katalog laut Bestückungsliste
   static const List<Medication> all = [
     // Teil 1
     adrenalin,
@@ -203,10 +208,13 @@ class MedicationCatalog {
   ];
 
   /// Sucht in Wirkstoff, Handelsname und Stärke (ohne Groß-/Kleinschreibung)
+  /// Durchsucht den aktuellen Katalog ([current]), alphabetisch sortiert.
   static List<Medication> search(String query) {
     final q = query.trim().toLowerCase();
-    if (q.isEmpty) return all;
-    return all
+    final sorted = List<Medication>.of(current)
+      ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+    if (q.isEmpty) return sorted;
+    return sorted
         .where((m) =>
             m.wirkstoff.toLowerCase().contains(q) ||
             (m.handelsname?.toLowerCase().contains(q) ?? false) ||
